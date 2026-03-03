@@ -1,0 +1,102 @@
+.footer {
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    padding: 60px 0 30px;
+}
+
+.footer__love {
+    text-align: center;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 32px;
+}
+
+.footer__heart {
+    color: #ef4444;
+    display: inline-block;
+    animation: float 2s ease-in-out infinite;
+}
+
+.footer__creators {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    flex-wrap: wrap;
+    margin-bottom: 40px;
+}
+
+.footer__card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 28px 36px;
+    min-width: 200px;
+    transition: all var(--transition-base);
+}
+
+.footer__card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}
+
+.footer__card-avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: var(--radius-full);
+    background: linear-gradient(135deg, var(--primary-light), var(--accent-light));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+}
+
+.footer__card-name {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.footer__card-links {
+    display: flex;
+    gap: 12px;
+}
+
+.footer__card-link {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-full);
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+}
+
+.footer__card-link:hover {
+    background: var(--primary);
+    color: white;
+    transform: translateY(-2px);
+}
+
+.footer__bottom {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-tertiary);
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+}
+
+@media (max-width: 480px) {
+    .footer__creators {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .footer__card {
+        width: 100%;
+        max-width: 280px;
+    }
+}
