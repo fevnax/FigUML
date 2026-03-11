@@ -1,7 +1,7 @@
 .footer {
-    background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     padding: 60px 0 30px;
+    position: relative;
 }
 
 .footer__love {
@@ -9,7 +9,7 @@
     font-size: 1.25rem;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 32px;
+    margin-bottom: 40px;
 }
 
 .footer__heart {
@@ -18,6 +18,7 @@
     animation: float 2s ease-in-out infinite;
 }
 
+/* ============ Creator Cards (Light Theme with Hero Colors) ============ */
 .footer__creators {
     display: flex;
     justify-content: center;
@@ -26,61 +27,105 @@
     margin-bottom: 40px;
 }
 
-.footer__card {
+.creator-card {
+    width: 320px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: white;
+    border: 1px solid var(--border);
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.creator-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 16px 40px rgba(99, 102, 241, 0.15);
+    border-color: var(--primary);
+}
+
+/* Photo area — uses hero gradient colors */
+.creator-card__photo {
+    width: 100%;
+    height: 140px;
+    background: linear-gradient(135deg, #c7d2fe 0%, #a5b4fc 25%, #93c5fd 50%, #67e8f9 75%, #a7f3d0 100%);
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 28px 36px;
-    min-width: 200px;
-    transition: all var(--transition-base);
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
 }
 
-.footer__card:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-lg);
+.creator-card__photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
-.footer__card-avatar {
-    width: 56px;
-    height: 56px;
-    border-radius: var(--radius-full);
-    background: linear-gradient(135deg, var(--primary-light), var(--accent-light));
+.creator-card__photo-placeholder {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--primary);
+    border: 3px solid rgba(255, 255, 255, 0.6);
 }
 
-.footer__card-name {
-    font-weight: 600;
-    font-size: 1rem;
+/* Body — light themed */
+.creator-card__body {
+    padding: 20px 24px;
+}
+
+.creator-card__overlay {
+    display: none;
+}
+
+.creator-card__content {
+    position: relative;
+}
+
+.creator-card__name {
+    font-size: 1.1rem;
+    font-weight: 700;
     color: var(--text-primary);
+    margin-bottom: 6px;
 }
 
-.footer__card-links {
+.creator-card__desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+.creator-card__links {
     display: flex;
-    gap: 12px;
+    gap: 10px;
 }
 
-.footer__card-link {
-    width: 36px;
-    height: 36px;
+.creator-card__link {
+    width: 34px;
+    height: 34px;
     border-radius: var(--radius-full);
-    background: var(--bg-tertiary);
+    background: var(--primary-light);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-secondary);
-    transition: all var(--transition-fast);
+    color: var(--primary);
+    transition: all 0.2s ease;
 }
 
-.footer__card-link:hover {
+.creator-card__link:hover {
     background: var(--primary);
     color: white;
     transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
+/* Bottom */
 .footer__bottom {
     text-align: center;
     font-size: 0.85rem;
@@ -89,14 +134,15 @@
     border-top: 1px solid var(--border);
 }
 
-@media (max-width: 480px) {
+/* ============ Responsive ============ */
+@media (max-width: 700px) {
     .footer__creators {
         flex-direction: column;
         align-items: center;
     }
 
-    .footer__card {
+    .creator-card {
         width: 100%;
-        max-width: 280px;
+        max-width: 340px;
     }
 }

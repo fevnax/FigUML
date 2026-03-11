@@ -35,7 +35,9 @@
 }
 
 .editor-pane__header--right {
-    justify-content: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
 }
 
 .editor-pane__filename {
@@ -159,12 +161,8 @@
 }
 
 .editor-pane__editor .cm-gutters {
-    background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
-}
-
-[data-theme="light"] .editor-pane__editor .cm-gutters {
     background: var(--bg-tertiary);
+    border-right: 1px solid var(--border);
 }
 
 /* Output Controls */
@@ -172,6 +170,43 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+/* Zoom Controls */
+.editor-pane__zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.editor-pane__zoom-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.editor-pane__zoom-btn:hover:not(:disabled) {
+    background: var(--primary-light);
+    color: var(--primary);
+}
+
+.editor-pane__zoom-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.editor-pane__zoom-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 40px;
+    text-align: center;
 }
 
 .btn-sm {
@@ -184,7 +219,7 @@
     flex: 1;
     overflow: auto;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     padding: 24px;
 }
@@ -192,10 +227,11 @@
 .editor-pane__svg-container {
     max-width: 100%;
     max-height: 100%;
-    overflow: auto;
+    overflow: visible;
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: transform 0.15s ease;
 }
 
 .editor-pane__svg-container svg {
@@ -238,6 +274,105 @@
     word-break: break-word;
 }
 
+/* ============ Guide Button ============ */
+.editor-pane__guide-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ============ Guide Modal ============ */
+.guide-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.guide-modal {
+    width: 65%;
+    max-width: 720px;
+    max-height: 70vh;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.guide-modal__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+}
+
+.guide-modal__header h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.guide-modal__close {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.guide-modal__close:hover {
+    background: var(--primary-light);
+    color: var(--primary);
+}
+
+.guide-modal__body {
+    padding: 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.guide-section h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--primary);
+}
+
+.guide-section__code {
+    background: #f1f5f9;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--text-primary);
+}
+
+.guide-section__note {
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    padding-left: 12px;
+    border-left: 3px solid var(--primary);
+}
+
 /* ============ Responsive ============ */
 @media (max-width: 768px) {
     .editor-page {
@@ -259,7 +394,17 @@
         flex-wrap: wrap;
     }
 
-    .btn-sm span {
+    .editor-pane__zoom-controls {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .editor-pane__btn-label {
         display: none;
+    }
+
+    .guide-modal {
+        width: 92%;
+        max-height: 80vh;
     }
 }

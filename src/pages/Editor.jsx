@@ -3,20 +3,17 @@ import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { saveDiagram, loadDiagram } from '../utils/diagramStorage';
-import { renderCustomDiagram, hasCustomRenderer, DIAGRAM_TYPES } from '../utils/diagramEngine';
+import { renderCustomDiagram, hasCustomRenderer, DIAGRAM_TYPES, DIAGRAM_GUIDES } from '../utils/diagramEngine';
 import { renderWithKroki } from '../utils/kroki';
 import { v4 as uuidv4 } from 'uuid';
 import { EditorView, basicSetup } from 'codemirror';
 import { EditorState } from '@codemirror/state';
-import { oneDark } from '@codemirror/theme-one-dark';
-import { useTheme } from '../context/ThemeContext';
 import Modal from '../components/Modal';
 import './Editor.css';
 
 export default function Editor() {
     const { id } = useParams();
     const { user, loading: authLoading } = useAuth();
-    const { theme } = useTheme();
     const { showToast } = useToast();
     const navigate = useNavigate();
 
@@ -30,8 +27,9 @@ export default function Editor() {
     const [rendering, setRendering] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
     const [saved, setSaved] = useState(false);
-    const [vizInstance, setVizInstance] = useState(null);
     const [clearModal, setClearModal] = useState(false);
+    const [guideOpen, setGuideOpen] = useState(false);
+    const [zoomLevel, setZoomLevel] = useState(1);
 
     const editorRef = useRef(null);
     const editorViewRef = useRef(null);
@@ -39,16 +37,9 @@ export default function Editor() {
     const saveTimeoutRef = useRef(null);
     const menuRef = useRef(null);
     const codeRef = useRef(code);
+    const outputRef = useRef(null);
 
-    // Keep code ref in sync
     useEffect(() => { codeRef.current = code; }, [code]);
-
-    // Initialize Viz.js for Graphviz
-    useEffect(() => {
-        import('@viz-js/viz').then(module => {
-            module.instance().then(viz => setVizInstance(viz));
-        }).catch(err => console.error('Failed to load Viz.js:', err));
-    }, []);
 
     // Load existing diagram
     useEffect(() => {
@@ -78,21 +69,19 @@ export default function Editor() {
             EditorView.lineWrapping,
         ];
 
-        if (theme === 'dark') extensions.push(oneDark);
-
         const state = EditorState.create({ doc: codeRef.current, extensions });
         const view = new EditorView({ state, parent: editorRef.current });
         editorViewRef.current = view;
 
         return () => view.destroy();
-    }, [theme]);
+    }, []);
 
     // Render diagram on code/type change
     useEffect(() => {
         if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current);
         renderTimeoutRef.current = setTimeout(() => handleRender(), 500);
         return () => { if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current); };
-    }, [code, diagramType, outputFormat, vizInstance]);
+    }, [code, diagramType, outputFormat]);
 
     // Auto-save
     useEffect(() => {
@@ -111,6 +100,23 @@ export default function Editor() {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    // Ctrl+scroll zoom
+    useEffect(() => {
+        const container = outputRef.current;
+        if (!container) return;
+        const handleWheel = (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                setZoomLevel(prev => {
+                    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                    return Math.min(3, Math.max(0.25, prev + delta));
+                });
+            }
+        };
+        container.addEventListener('wheel', handleWheel, { passive: false });
+        return () => container.removeEventListener('wheel', handleWheel);
+    }, []);
+
     const handleRender = useCallback(async () => {
         if (!code.trim()) {
             setRenderedOutput('');
@@ -122,7 +128,6 @@ export default function Editor() {
         setRenderError('');
 
         try {
-            // Use custom engine for supported types
             if (hasCustomRenderer(diagramType)) {
                 const result = renderCustomDiagram(code, diagramType);
                 if (result) {
@@ -130,14 +135,7 @@ export default function Editor() {
                 } else {
                     setRenderError('Could not parse diagram. Check your syntax.');
                 }
-            }
-            // Use Viz.js for Graphviz (client-side)
-            else if (diagramType === 'graphviz' && vizInstance && outputFormat === 'svg') {
-                const result = vizInstance.renderSVGElement(code);
-                setRenderedOutput(result.outerHTML);
-            }
-            // Fallback to Kroki API
-            else {
+            } else {
                 const result = await renderWithKroki(code, diagramType, outputFormat);
                 if (outputFormat === 'svg') {
                     setRenderedOutput(result);
@@ -150,7 +148,7 @@ export default function Editor() {
         }
 
         setRendering(false);
-    }, [code, diagramType, outputFormat, vizInstance]);
+    }, [code, diagramType, outputFormat]);
 
     const handleAutoSave = async () => {
         if (!user) return;
@@ -182,38 +180,73 @@ export default function Editor() {
 
     const handleDownload = () => {
         if (!renderedOutput) return;
-        let blob, ext;
+
         if (outputFormat === 'svg') {
-            blob = new Blob([renderedOutput], { type: 'image/svg+xml' });
-            ext = 'svg';
+            const blob = new Blob([renderedOutput], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.svg`;
+            a.click();
+            URL.revokeObjectURL(url);
         } else {
-            const match = renderedOutput.match(/src="([^"]+)"/);
-            if (match) { const a = document.createElement('a'); a.href = match[1]; a.download = `${fileName}.${outputFormat}`; a.click(); return; }
-            return;
+            // PNG download: convert SVG to canvas then to PNG
+            const svgContent = renderedOutput;
+            const svgBlob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(svgBlob);
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const scale = 2;
+                canvas.width = img.naturalWidth * scale;
+                canvas.height = img.naturalHeight * scale;
+                const ctx = canvas.getContext('2d');
+                ctx.scale(scale, scale);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, img.naturalWidth, img.naturalHeight);
+                ctx.drawImage(img, 0, 0);
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        const pngUrl = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = pngUrl;
+                        a.download = `${fileName}.png`;
+                        a.click();
+                        URL.revokeObjectURL(pngUrl);
+                    }
+                }, 'image/png');
+                URL.revokeObjectURL(url);
+            };
+            img.onerror = () => {
+                showToast('Failed to generate PNG', 'error');
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
         }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${fileName}.${ext}`;
-        a.click();
-        URL.revokeObjectURL(url);
     };
 
     const handleCopyLink = async () => {
-        // Save first to ensure diagram exists in Firestore
-        if (user) {
-            try {
-                await saveDiagram(diagramId, user.uid, { name: fileName, code, diagramType, isShared: true });
-            } catch (err) {
-                console.error('Save before sharing failed:', err);
-            }
-        }
-        const url = `${window.location.origin}/view/${diagramId}`;
         try {
-            await navigator.clipboard.writeText(url);
+            if (user) {
+                await saveDiagram(diagramId, user.uid, { name: fileName, code, diagramType, isShared: true });
+            }
+            const url = `${window.location.origin}/view/${diagramId}`;
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(url);
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = url;
+                textarea.style.cssText = 'position:fixed;opacity:0;left:-9999px';
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                try { document.execCommand('copy'); } catch { }
+                document.body.removeChild(textarea);
+            }
             showToast('Link copied to clipboard!', 'success');
-        } catch {
-            showToast('Failed to copy link', 'error');
+        } catch (err) {
+            console.error('Copy link error:', err);
+            showToast(`Share link: ${window.location.origin}/view/${diagramId}`, 'info');
         }
     };
 
@@ -227,6 +260,10 @@ export default function Editor() {
             });
         }
     };
+
+    const handleZoomIn = () => setZoomLevel(prev => Math.min(3, prev + 0.25));
+    const handleZoomOut = () => setZoomLevel(prev => Math.max(0.25, prev - 0.25));
+    const handleZoomReset = () => setZoomLevel(1);
 
     if (authLoading) return null;
     if (!user) return <Navigate to="/auth" replace />;
@@ -292,6 +329,10 @@ export default function Editor() {
                             <option key={key} value={key}>{val.label}</option>
                         ))}
                     </select>
+                    <button className="btn btn-secondary btn-sm editor-pane__guide-btn" onClick={() => setGuideOpen(true)} title="Syntax Guide">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                        <span className="editor-pane__btn-label">Guide</span>
+                    </button>
                 </div>
 
                 <div className="editor-pane__editor" ref={editorRef} />
@@ -307,16 +348,28 @@ export default function Editor() {
                         </select>
                         <button className="btn btn-secondary btn-sm" onClick={handleDownload} disabled={!renderedOutput} title="Download">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-                            Download
+                            <span className="editor-pane__btn-label">Download</span>
                         </button>
                         <button className="btn btn-secondary btn-sm" onClick={handleCopyLink} title="Copy shareable link">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-                            Copy Link
+                            <span className="editor-pane__btn-label">Copy Link</span>
+                        </button>
+                    </div>
+                    <div className="editor-pane__zoom-controls">
+                        <button className="editor-pane__zoom-btn" onClick={handleZoomOut} title="Zoom out" disabled={zoomLevel <= 0.25}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
+                        </button>
+                        <span className="editor-pane__zoom-label">{Math.round(zoomLevel * 100)}%</span>
+                        <button className="editor-pane__zoom-btn" onClick={handleZoomIn} title="Zoom in" disabled={zoomLevel >= 3}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
+                        </button>
+                        <button className="editor-pane__zoom-btn" onClick={handleZoomReset} title="Reset zoom">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
                         </button>
                     </div>
                 </div>
 
-                <div className="editor-pane__output">
+                <div className="editor-pane__output" ref={outputRef}>
                     {rendering && (
                         <div className="editor-pane__rendering">
                             <div className="spinner" />
@@ -330,7 +383,11 @@ export default function Editor() {
                         </div>
                     )}
                     {!rendering && !renderError && renderedOutput && (
-                        <div className="editor-pane__svg-container" dangerouslySetInnerHTML={{ __html: renderedOutput }} />
+                        <div
+                            className="editor-pane__svg-container"
+                            style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}
+                            dangerouslySetInnerHTML={{ __html: renderedOutput }}
+                        />
                     )}
                     {!rendering && !renderError && !renderedOutput && (
                         <div className="editor-pane__placeholder">
@@ -344,6 +401,29 @@ export default function Editor() {
                     )}
                 </div>
             </div>
+
+            {/* Guide Modal */}
+            {guideOpen && (
+                <div className="guide-overlay" onClick={() => setGuideOpen(false)}>
+                    <div className="guide-modal animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                        <div className="guide-modal__header">
+                            <h3>{DIAGRAM_GUIDES[diagramType]?.title || 'Syntax Guide'}</h3>
+                            <button className="guide-modal__close" onClick={() => setGuideOpen(false)}>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                            </button>
+                        </div>
+                        <div className="guide-modal__body">
+                            {DIAGRAM_GUIDES[diagramType]?.sections.map((s, i) => (
+                                <div key={i} className="guide-section">
+                                    <h4>{s.heading}</h4>
+                                    <pre className="guide-section__code">{s.content}</pre>
+                                    {s.note && <p className="guide-section__note">{s.note}</p>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

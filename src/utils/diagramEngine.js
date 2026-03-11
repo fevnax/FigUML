@@ -1,524 +1,504 @@
 /**
- * FigUML Custom Diagram Engine
- * Pure SVG renderers for: Class, Sequence, Activity, Use Case, ER, DFD
- * No external API dependency — all rendering happens client-side.
+ * FigUML Custom Diagram Engine — Full Rewrite
+ * Pure SVG renderers for: Class, Sequence, Activity, Use Case, ER (Chen), DFD
  */
+import dagre from '@dagrejs/dagre';
 
 // ============================================================================
 // SHARED UTILITIES
 // ============================================================================
 
 const COLORS = {
-    primary: '#6366f1',
-    primaryLight: '#e0e1ff',
-    accent: '#06b6d4',
-    accentLight: '#cffafe',
-    green: '#10b981',
-    greenLight: '#d1fae5',
-    orange: '#f59e0b',
-    orangeLight: '#fef3c7',
-    pink: '#ec4899',
-    pinkLight: '#fce7f3',
+    primary: '#6366f1', primaryLight: '#e0e1ff',
+    accent: '#06b6d4', accentLight: '#cffafe',
+    green: '#10b981', greenLight: '#d1fae5',
+    orange: '#f59e0b', orangeLight: '#fef3c7',
+    pink: '#ec4899', pinkLight: '#fce7f3',
     red: '#ef4444',
-    bg: '#ffffff',
-    text: '#1e293b',
-    textLight: '#64748b',
-    border: '#cbd5e1',
-    line: '#475569',
+    bg: '#ffffff', text: '#1e293b', textLight: '#64748b',
+    border: '#cbd5e1', line: '#475569',
 };
 
-function escapeHtml(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+const CLASS_PALETTE = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#ef4444', '#8b5cf6', '#14b8a6'];
 
-function measureText(text, fontSize = 14) {
-    return text.length * fontSize * 0.58;
-}
+function esc(str) { return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function escapeHtml(str) { return esc(str); }
+function mt(text, fs = 14) { return text.length * fs * 0.58; }
+function measureText(t, f) { return mt(t, f); }
 
-function wrapSvg(content, width, height) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="font-family: 'Inter', -apple-system, sans-serif;">
+function boxEdge(box, tx, ty) {
+    const cx = box.x + box.w / 2, cy = box.y + box.h / 2, dx = tx - cx, dy = ty - cy;
+    if (!dx && !dy) return { x: cx, y: cy };
+    const s = Math.abs(dx) * (box.h / 2) > Math.abs(dy) * (box.w / 2) ? (box.w / 2) / Math.abs(dx) : (box.h / 2) / Math.abs(dy);
+    return { x: cx + dx * s, y: cy + dy * s };
+}
+function getBoxEdgePoint(b, tx, ty) { return boxEdge(b, tx, ty); }
+
+function wrapSvg(content, w, h) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="font-family:'Inter',-apple-system,sans-serif;">
   <defs>
-    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="${COLORS.line}" />
-    </marker>
-    <marker id="arrowhead-open" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-      <polyline points="0 0, 10 3.5, 0 7" fill="none" stroke="${COLORS.line}" stroke-width="1.5" />
-    </marker>
-    <marker id="diamond" markerWidth="12" markerHeight="8" refX="12" refY="4" orient="auto">
-      <polygon points="0 4, 6 0, 12 4, 6 8" fill="${COLORS.line}" />
-    </marker>
-    <marker id="diamond-open" markerWidth="12" markerHeight="8" refX="12" refY="4" orient="auto">
-      <polygon points="0 4, 6 0, 12 4, 6 8" fill="${COLORS.bg}" stroke="${COLORS.line}" stroke-width="1" />
-    </marker>
+    <marker id="ah" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="${COLORS.line}"/></marker>
+    <marker id="ah-open" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto"><polyline points="1 1,11 4,1 7" fill="none" stroke="${COLORS.line}" stroke-width="1.5"/></marker>
+    <marker id="ah-tri" markerWidth="14" markerHeight="10" refX="13" refY="5" orient="auto"><polygon points="1 1,13 5,1 9" fill="${COLORS.bg}" stroke="${COLORS.line}" stroke-width="1.5"/></marker>
+    <marker id="ah-diamond" markerWidth="14" markerHeight="10" refX="14" refY="5" orient="auto"><polygon points="0 5,7 1,14 5,7 9" fill="${COLORS.line}"/></marker>
+    <marker id="ah-diamond-o" markerWidth="14" markerHeight="10" refX="14" refY="5" orient="auto"><polygon points="0 5,7 1,14 5,7 9" fill="${COLORS.bg}" stroke="${COLORS.line}" stroke-width="1"/></marker>
   </defs>
   ${content}
 </svg>`;
 }
 
 // ============================================================================
-// CLASS DIAGRAM RENDERER
+// CLASS DIAGRAM
 // ============================================================================
 
 function parseClassDiagram(code) {
-    const classes = [];
-    const relations = [];
+    const classes = [], relations = [];
     const lines = code.split('\n').map(l => l.trim()).filter(l => l);
-
-    let currentClass = null;
-    let section = 'attributes'; // 'attributes' or 'methods'
-
+    let cur = null, sec = 'attr';
     for (const line of lines) {
-        // Relation: ClassName -- ClassName or ClassName --> ClassName
-        const relMatch = line.match(/^(\w+)\s*(--|->|<>--|<>->|\.\.|\.>|<\|--|<\|\.\.)\s*(\w+)(?:\s*:\s*(.+))?$/);
-        if (relMatch) {
-            relations.push({ from: relMatch[1], to: relMatch[3], type: relMatch[2], label: relMatch[4] || '' });
-            continue;
-        }
-
-        // Class header: class ClassName { or class ClassName
-        const classMatch = line.match(/^class\s+(\w+)\s*\{?\s*$/);
-        if (classMatch) {
-            currentClass = { name: classMatch[1], attributes: [], methods: [] };
-            classes.push(currentClass);
-            section = 'attributes';
-            continue;
-        }
-
-        // End of class
-        if (line === '}') {
-            currentClass = null;
-            continue;
-        }
-
-        // Separator ---
-        if (line === '---' && currentClass) {
-            section = 'methods';
-            continue;
-        }
-
-        // Attributes/methods within a class
-        if (currentClass && line) {
-            if (line.includes('(') || section === 'methods') {
-                currentClass.methods.push(line);
-                section = 'methods';
-            } else {
-                currentClass.attributes.push(line);
-            }
+        // Relation with optional cardinality: A "1" --> "0..*" B : label
+        const rm = line.match(/^(\w+)\s*(?:"([^"]*)")?\s*(--|->|<>--|<>->|\.\.|\.>|<\|--|<\|\.\.)\s*(?:"([^"]*)")?\s*(\w+)(?:\s*:\s*(.+))?$/);
+        if (rm) { relations.push({ from: rm[1], to: rm[5], type: rm[3], label: rm[6] || '', cardFrom: rm[2] || '', cardTo: rm[4] || '' }); continue; }
+        // Class header with optional color: class Name #hexcolor {
+        const cm = line.match(/^class\s+(\w+)(?:\s+(#[0-9a-fA-F]{3,8}))?\s*\{?\s*$/);
+        if (cm) { cur = { name: cm[1], color: cm[2] || '', attributes: [], methods: [] }; classes.push(cur); sec = 'attr'; continue; }
+        if (line === '}') { cur = null; continue; }
+        if (line === '---' && cur) { sec = 'meth'; continue; }
+        if (cur && line) {
+            if (line.includes('(') || sec === 'meth') { cur.methods.push(line); sec = 'meth'; }
+            else cur.attributes.push(line);
         }
     }
-
     return { classes, relations };
 }
 
 function renderClassDiagram(code) {
     const { classes, relations } = parseClassDiagram(code);
-    if (classes.length === 0) return null;
+    if (!classes.length) return null;
+    const HDR = 36, LH = 24, PAD = 16, GAP = 160, MARGIN = 60, MIN_W = 180;
 
-    const BOX_MIN_W = 200;
-    const HEADER_H = 40;
-    const LINE_H = 24;
-    const PAD = 16;
-    const GAP = 60;
-
-    // Calculate box sizes
-    const boxes = classes.map((cls, i) => {
-        const attrCount = cls.attributes.length || 0;
-        const methCount = cls.methods.length || 0;
-        const totalLines = attrCount + methCount;
-        const headerWidth = measureText(cls.name, 16) + PAD * 2;
-        const maxAttrWidth = cls.attributes.reduce((max, a) => Math.max(max, measureText(a, 13) + PAD * 2), 0);
-        const maxMethWidth = cls.methods.reduce((max, m) => Math.max(max, measureText(m, 13) + PAD * 2), 0);
-        const w = Math.max(BOX_MIN_W, headerWidth, maxAttrWidth, maxMethWidth);
-        const attrSectionH = attrCount > 0 ? attrCount * LINE_H + 12 : 20;
-        const methSectionH = methCount > 0 ? methCount * LINE_H + 12 : 20;
-        const h = HEADER_H + attrSectionH + methSectionH;
-        return { ...cls, w, h, attrSectionH, methSectionH, idx: i };
+    const boxes = classes.map((c, i) => {
+        const nw = mt(c.name, 15) + PAD * 2;
+        const aw = c.attributes.reduce((m, a) => Math.max(m, mt(a, 13) + PAD * 2), 0);
+        const mw = c.methods.reduce((m, a) => Math.max(m, mt(a, 13) + PAD * 2), 0);
+        const w = Math.max(MIN_W, nw, aw, mw);
+        const attrH = c.attributes.length ? c.attributes.length * LH + 10 : 16;
+        const methH = c.methods.length ? c.methods.length * LH + 10 : 16;
+        const h = HDR + attrH + methH;
+        const color = c.color || COLORS.primary;
+        return { ...c, w, h, attrH, methH, idx: i, color };
     });
 
-    // Layout: grid
-    const cols = Math.min(boxes.length, 3);
-    const rows = Math.ceil(boxes.length / cols);
-    const colWidths = [];
-    for (let c = 0; c < cols; c++) {
-        let maxW = 0;
-        for (let r = 0; r < rows; r++) {
-            const idx = r * cols + c;
-            if (idx < boxes.length) maxW = Math.max(maxW, boxes[idx].w);
-        }
-        colWidths.push(maxW);
-    }
+    const cols = Math.min(boxes.length, 3), rows = Math.ceil(boxes.length / cols);
+    const colW = []; for (let c = 0; c < cols; c++) { let mx = 0; for (let r = 0; r < rows; r++) { const i = r * cols + c; if (i < boxes.length) mx = Math.max(mx, boxes[i].w); } colW.push(mx); }
+    const rowH = []; for (let r = 0; r < rows; r++) { let mx = 0; for (let c = 0; c < cols; c++) { const i = r * cols + c; if (i < boxes.length) mx = Math.max(mx, boxes[i].h); } rowH.push(mx); }
+    let totalW = MARGIN * 2; colW.forEach(c => totalW += c + GAP); totalW -= GAP;
+    let totalH = MARGIN * 2; rowH.forEach(r => totalH += r + GAP); totalH -= GAP;
 
-    const margin = 40;
-    let totalW = margin * 2;
-    for (const cw of colWidths) totalW += cw + GAP;
-    totalW -= GAP;
-
-    const rowHeights = [];
-    for (let r = 0; r < rows; r++) {
-        let maxH = 0;
-        for (let c = 0; c < cols; c++) {
-            const idx = r * cols + c;
-            if (idx < boxes.length) maxH = Math.max(maxH, boxes[idx].h);
-        }
-        rowHeights.push(maxH);
-    }
-
-    let totalH = margin * 2;
-    for (const rh of rowHeights) totalH += rh + GAP;
-    totalH -= GAP;
-
-    // Assign positions
-    boxes.forEach((box, i) => {
-        const r = Math.floor(i / cols);
-        const c = i % cols;
-        let x = margin;
-        for (let cc = 0; cc < c; cc++) x += colWidths[cc] + GAP;
-        let y = margin;
-        for (let rr = 0; rr < r; rr++) y += rowHeights[rr] + GAP;
-        box.x = x;
-        box.y = y;
+    boxes.forEach((b, i) => {
+        const r = Math.floor(i / cols), c = i % cols;
+        let x = MARGIN; for (let cc = 0; cc < c; cc++) x += colW[cc] + GAP;
+        let y = MARGIN; for (let rr = 0; rr < r; rr++) y += rowH[rr] + GAP;
+        b.x = x; b.y = y;
     });
 
-    let svg = '';
+    let svg = "";
+    const cmap = {}; boxes.forEach(b => { cmap[b.name] = b; });
 
-    // Draw relations
-    const classMap = {};
-    boxes.forEach(b => { classMap[b.name] = b; });
+    // Draw boxes
+    for (const b of boxes) {
+        const { x, y, w, h, name, attributes, methods, attrH, methH, color } = b;
+        svg += '<rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="' + w + '" height="' + h + '" rx="6" fill="rgba(0,0,0,0.05)"/>';
+        svg += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="6" fill="' + COLORS.bg + '" stroke="' + color + '" stroke-width="2"/>';
+        svg += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + HDR + '" rx="6" fill="' + color + '"/>';
+        svg += '<rect x="' + x + '" y="' + (y + HDR - 6) + '" width="' + w + '" height="6" fill="' + color + '"/>';
+        svg += '<text x="' + (x + w / 2) + '" y="' + (y + 23) + '" text-anchor="middle" font-size="14" font-weight="700" fill="white">' + esc(name) + '</text>';
+        svg += '<line x1="' + x + '" y1="' + (y + HDR) + '" x2="' + (x + w) + '" y2="' + (y + HDR) + '" stroke="' + color + '" stroke-width="1"/>';
+        var ay = y + HDR + 6;
+        for (var ai = 0; ai < attributes.length; ai++) { svg += '<text x="' + (x + 12) + '" y="' + (ay + 14) + '" font-size="13" fill="' + COLORS.text + '">' + esc(attributes[ai]) + '</text>'; ay += LH; }
+        var methY2 = y + HDR + attrH;
+        svg += '<line x1="' + x + '" y1="' + methY2 + '" x2="' + (x + w) + '" y2="' + methY2 + '" stroke="' + COLORS.border + '" stroke-width="1"/>';
+        var my2 = methY2 + 6;
+        for (var mi = 0; mi < methods.length; mi++) { svg += '<text x="' + (x + 12) + '" y="' + (my2 + 14) + '" font-size="13" fill="' + COLORS.text + '">' + esc(methods[mi]) + '</text>'; my2 += LH; }
+    }
 
-    for (const rel of relations) {
-        const from = classMap[rel.from];
-        const to = classMap[rel.to];
+    // Draw relations with orthogonal routing
+    for (var ri = 0; ri < relations.length; ri++) {
+        var rel = relations[ri];
+        var from = cmap[rel.from], to = cmap[rel.to];
         if (!from || !to) continue;
 
-        const fx = from.x + from.w / 2;
-        const fy = from.y + from.h / 2;
-        const tx = to.x + to.w / 2;
-        const ty = to.y + to.h / 2;
+        var fc = { x: from.x + from.w / 2, y: from.y + from.h / 2 };
+        var tc = { x: to.x + to.w / 2, y: to.y + to.h / 2 };
+        var dx = tc.x - fc.x, dy = tc.y - fc.y;
 
-        let marker = 'url(#arrowhead)';
-        let dash = '';
-        if (rel.type === '--') { marker = ''; }
-        if (rel.type === '..' || rel.type === '.>') { dash = 'stroke-dasharray="6,4"'; }
-        if (rel.type === '<|--' || rel.type === '<|..') { marker = 'url(#arrowhead-open)'; }
-        if (rel.type.startsWith('<>')) { marker = 'url(#diamond)'; }
+        var marker = 'url(#ah)', dash = "";
+        if (rel.type === "--") marker = "";
+        if (rel.type === ".." || rel.type === ".>") dash = 'stroke-dasharray="6,4"';
+        if (rel.type === "<|--" || rel.type === "<|..") marker = "url(#ah-tri)";
+        if (rel.type === "<>--") marker = "url(#ah-diamond)";
+        if (rel.type === "<>->") marker = "url(#ah-diamond-o)";
 
-        svg += `<line x1="${fx}" y1="${fy}" x2="${tx}" y2="${ty}" stroke="${COLORS.border}" stroke-width="1.5" ${dash} marker-end="${marker}" />`;
+        var fp, tp, labelX, labelY, pathSvg;
+
+        // Helper: check if segment crosses any box
+        var segCrossesBox = function(x1, y1, x2, y2) {
+            for (var ci = 0; ci < boxes.length; ci++) {
+                var cb = boxes[ci];
+                if (cb.name === rel.from || cb.name === rel.to) continue;
+                var cx1 = cb.x - 5, cy1b = cb.y - 5, cx2 = cb.x + cb.w + 5, cy2b = cb.y + cb.h + 5;
+                for (var ct = 0.1; ct <= 0.9; ct += 0.1) {
+                    var cpx = x1 + (x2 - x1) * ct, cpy = y1 + (y2 - y1) * ct;
+                    if (cpx > cx1 && cpx < cx2 && cpy > cy1b && cpy < cy2b) return true;
+                }
+            }
+            return false;
+        };
+
+        // Determine grid position
+        var fromRow = Math.floor(from.idx / 3), fromCol = from.idx % 3;
+        var toRow = Math.floor(to.idx / 3), toCol = to.idx % 3;
+        var sameRow = fromRow === toRow;
+        var sameCol = fromCol === toCol;
+
+        if (sameCol && !sameRow) {
+            // Same column, different row: straight vertical
+            if (dy > 0) {
+                fp = { x: fc.x, y: from.y + from.h };
+                tp = { x: tc.x, y: to.y };
+            } else {
+                fp = { x: fc.x, y: from.y };
+                tp = { x: tc.x, y: to.y + to.h };
+            }
+            labelX = fp.x + 10; labelY = (fp.y + tp.y) / 2;
+            pathSvg = '<line x1="' + fp.x + '" y1="' + fp.y + '" x2="' + tp.x + '" y2="' + tp.y + '" stroke="' + COLORS.line + '" stroke-width="1.5" ' + dash + ' marker-end="' + marker + '"/>';
+
+        } else if (sameRow && !sameCol) {
+            // Same row: try straight horizontal first
+            var hfp, htp;
+            if (dx > 0) {
+                hfp = { x: from.x + from.w, y: fc.y };
+                htp = { x: to.x, y: fc.y };
+            } else {
+                hfp = { x: from.x, y: fc.y };
+                htp = { x: to.x + to.w, y: fc.y };
+            }
+
+            if (!segCrossesBox(hfp.x, hfp.y, htp.x, htp.y)) {
+                // Straight horizontal
+                fp = hfp; tp = htp;
+                labelX = (fp.x + tp.x) / 2; labelY = fp.y - 12;
+                pathSvg = '<line x1="' + fp.x + '" y1="' + fp.y + '" x2="' + tp.x + '" y2="' + tp.y + '" stroke="' + COLORS.line + '" stroke-width="1.5" ' + dash + ' marker-end="' + marker + '"/>';
+            } else {
+                // Crosses a box: L-shape above or below
+                // Try going below first
+                var belowY = 0;
+                for (var bj = 0; bj < boxes.length; bj++) {
+                    belowY = Math.max(belowY, boxes[bj].y + boxes[bj].h);
+                }
+                belowY += 30;
+
+                var aboveY = Infinity;
+                for (var bk = 0; bk < boxes.length; bk++) {
+                    aboveY = Math.min(aboveY, boxes[bk].y);
+                }
+                aboveY -= 30;
+
+                // Check which detour is shorter
+                var belowDist = Math.abs(fc.y - belowY) + Math.abs(belowY - tc.y);
+                var aboveDist = Math.abs(fc.y - aboveY) + Math.abs(aboveY - tc.y);
+                var detourY = belowDist < aboveDist ? belowY : aboveY;
+
+                fp = { x: fc.x, y: detourY < fc.y ? from.y : from.y + from.h };
+                tp = { x: tc.x, y: detourY < tc.y ? to.y : to.y + to.h };
+                labelX = (fp.x + tp.x) / 2; labelY = detourY - 8;
+                pathSvg = '<path d="M ' + fp.x + ' ' + fp.y + ' L ' + fp.x + ' ' + detourY + ' L ' + tp.x + ' ' + detourY + ' L ' + tp.x + ' ' + tp.y + '" fill="none" stroke="' + COLORS.line + '" stroke-width="1.5" ' + dash + ' marker-end="' + marker + '"/>';
+            }
+
+        } else {
+            // Different row and different column: L-shape routing
+            // Try horizontal-first (exit right/left, then go up/down)
+            var hfpX = dx > 0 ? from.x + from.w : from.x;
+            var hfpY = fc.y;
+            var htpX = tc.x;
+            var htpY = dy > 0 ? to.y : to.y + to.h;
+            var hCornerX = tc.x, hCornerY = fc.y;
+
+            // Try vertical-first (exit top/bottom, then go right/left)
+            var vfpX = fc.x;
+            var vfpY = dy > 0 ? from.y + from.h : from.y;
+            var vtpX = dx > 0 ? to.x : to.x + to.w;
+            var vtpY = tc.y;
+            var vCornerX = fc.x, vCornerY = tc.y;
+
+            var hCross = segCrossesBox(hfpX, hfpY, hCornerX, hCornerY) || segCrossesBox(hCornerX, hCornerY, htpX, htpY);
+            var vCross = segCrossesBox(vfpX, vfpY, vCornerX, vCornerY) || segCrossesBox(vCornerX, vCornerY, vtpX, vtpY);
+
+            if (!hCross) {
+                fp = { x: hfpX, y: hfpY }; tp = { x: htpX, y: htpY };
+                labelX = hCornerX + 10; labelY = hCornerY - 8;
+                pathSvg = '<path d="M ' + fp.x + ' ' + fp.y + ' L ' + hCornerX + ' ' + hCornerY + ' L ' + tp.x + ' ' + tp.y + '" fill="none" stroke="' + COLORS.line + '" stroke-width="1.5" ' + dash + ' marker-end="' + marker + '"/>';
+            } else if (!vCross) {
+                fp = { x: vfpX, y: vfpY }; tp = { x: vtpX, y: vtpY };
+                labelX = vCornerX + 10; labelY = vCornerY - 8;
+                pathSvg = '<path d="M ' + fp.x + ' ' + fp.y + ' L ' + vCornerX + ' ' + vCornerY + ' L ' + tp.x + ' ' + tp.y + '" fill="none" stroke="' + COLORS.line + '" stroke-width="1.5" ' + dash + ' marker-end="' + marker + '"/>';
+            } else {
+                // U-shape detour
+                var detX = (dx > 0 ? Math.min(from.x, to.x) - 40 : Math.max(from.x + from.w, to.x + to.w) + 40);
+                fp = { x: dx > 0 ? from.x : from.x + from.w, y: fc.y };
+                tp = { x: dx > 0 ? to.x : to.x + to.w, y: tc.y };
+                labelX = detX + 10; labelY = (fp.y + tp.y) / 2 - 8;
+                pathSvg = '<path d="M ' + fp.x + ' ' + fp.y + ' L ' + detX + ' ' + fp.y + ' L ' + detX + ' ' + tp.y + ' L ' + tp.x + ' ' + tp.y + '" fill="none" stroke="' + COLORS.line + '" stroke-width="1.5" ' + dash + ' marker-end="' + marker + '"/>';
+            }
+        }
+
+        svg += pathSvg;
+
+        // Label near the path
         if (rel.label) {
-            const mx = (fx + tx) / 2;
-            const my = (fy + ty) / 2;
-            svg += `<text x="${mx}" y="${my - 6}" text-anchor="middle" font-size="11" fill="${COLORS.textLight}">${escapeHtml(rel.label)}</text>`;
+            var lw = mt(rel.label, 11) + 8;
+            svg += '<rect x="' + (labelX - lw / 2) + '" y="' + (labelY - 6) + '" width="' + lw + '" height="16" fill="white" rx="2"/>';
+            svg += '<text x="' + labelX + '" y="' + (labelY + 6) + '" text-anchor="middle" font-size="11" font-style="italic" fill="' + COLORS.textLight + '">' + esc(rel.label) + '</text>';
+        }
+        if (rel.cardFrom) {
+            var cf1x = fp.x + (tp.x - fp.x) * 0.06, cf1y = fp.y + (tp.y - fp.y) * 0.06;
+            svg += '<text x="' + (cf1x + 8) + '" y="' + (cf1y - 8) + '" font-size="11" fill="' + COLORS.text + '">' + esc(rel.cardFrom) + '</text>';
+        }
+        if (rel.cardTo) {
+            var ct1x = tp.x + (fp.x - tp.x) * 0.06, ct1y = tp.y + (fp.y - tp.y) * 0.06;
+            svg += '<text x="' + (ct1x + 8) + '" y="' + (ct1y - 8) + '" font-size="11" fill="' + COLORS.text + '">' + esc(rel.cardTo) + '</text>';
         }
     }
-
-    // Draw class boxes
-    for (const box of boxes) {
-        const { x, y, w, h, name, attributes, methods, attrSectionH, methSectionH } = box;
-
-        // Shadow
-        svg += `<rect x="${x + 2}" y="${y + 2}" width="${w}" height="${h}" rx="8" fill="rgba(0,0,0,0.06)" />`;
-        // Box
-        svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${COLORS.bg}" stroke="${COLORS.primary}" stroke-width="2" />`;
-        // Header
-        svg += `<rect x="${x}" y="${y}" width="${w}" height="${HEADER_H}" rx="8" fill="${COLORS.primary}" />`;
-        svg += `<rect x="${x}" y="${y + HEADER_H - 8}" width="${w}" height="8" fill="${COLORS.primary}" />`;
-        svg += `<text x="${x + w / 2}" y="${y + 26}" text-anchor="middle" font-size="15" font-weight="700" fill="white">${escapeHtml(name)}</text>`;
-
-        // Attributes
-        let cy = y + HEADER_H + 12;
-        for (const attr of attributes) {
-            svg += `<text x="${x + PAD}" y="${cy + 14}" font-size="13" fill="${COLORS.text}">${escapeHtml(attr)}</text>`;
-            cy += LINE_H;
-        }
-
-        // Divider
-        const divY = y + HEADER_H + attrSectionH;
-        svg += `<line x1="${x + 8}" y1="${divY}" x2="${x + w - 8}" y2="${divY}" stroke="${COLORS.border}" stroke-width="1" />`;
-
-        // Methods
-        cy = divY + 12;
-        for (const meth of methods) {
-            svg += `<text x="${x + PAD}" y="${cy + 14}" font-size="13" fill="${COLORS.primary}" font-style="italic">${escapeHtml(meth)}</text>`;
-            cy += LINE_H;
-        }
-    }
-
     return wrapSvg(svg, totalW, totalH);
 }
 
 // ============================================================================
-// SEQUENCE DIAGRAM RENDERER
+// SEQUENCE DIAGRAM (with activation boxes)
 // ============================================================================
 
 function parseSequenceDiagram(code) {
-    const participants = [];
-    const messages = [];
+    const participants = [], messages = [];
     const lines = code.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-
     for (const line of lines) {
-        const partMatch = line.match(/^participant\s+(.+)$/i);
-        if (partMatch) {
-            const name = partMatch[1].replace(/"/g, '').trim();
-            if (!participants.includes(name)) participants.push(name);
-            continue;
-        }
-
-        // Message: A -> B: text  or A --> B: text  or A ->> B: text
-        const msgMatch = line.match(/^(.+?)\s*(->|-->|->>|-->>)\s*(.+?):\s*(.+)$/);
-        if (msgMatch) {
-            const from = msgMatch[1].trim();
-            const to = msgMatch[3].trim();
-            if (!participants.includes(from)) participants.push(from);
-            if (!participants.includes(to)) participants.push(to);
-            messages.push({
-                from, to,
-                type: msgMatch[2],
-                text: msgMatch[4].trim()
-            });
-            continue;
-        }
-
-        // note over A: text
-        const noteMatch = line.match(/^note\s+(?:over\s+)?(.+?):\s*(.+)$/i);
-        if (noteMatch) {
-            messages.push({ type: 'note', over: noteMatch[1].trim(), text: noteMatch[2].trim() });
-        }
+        const pm = line.match(/^participant\s+(.+)$/i);
+        if (pm) { const n = pm[1].replace(/"/g, '').trim(); if (!participants.includes(n)) participants.push(n); continue; }
+        const mm = line.match(/^(.+?)\s*(->|-->|->>{1}|-->>)\s*(.+?):\s*(.+)$/);
+        if (mm) { const f = mm[1].trim(), t = mm[3].trim(); if (!participants.includes(f)) participants.push(f); if (!participants.includes(t)) participants.push(t); messages.push({ from: f, to: t, type: mm[2], text: mm[4].trim() }); continue; }
+        const nm = line.match(/^note\s+(?:over\s+)?(.+?):\s*(.+)$/i);
+        if (nm) messages.push({ type: 'note', over: nm[1].trim(), text: nm[2].trim() });
     }
-
     return { participants, messages };
 }
 
 function renderSequenceDiagram(code) {
     const { participants, messages } = parseSequenceDiagram(code);
-    if (participants.length === 0) return null;
+    if (!participants.length) return null;
+    const PW = 120, PH = 40, GAP = 180, MG = 50, PAD = 50;
+    const pp = {}; participants.forEach((p, i) => { pp[p] = PAD + i * GAP + GAP / 2; });
+    const totalW = PAD * 2 + participants.length * GAP, totalH = PH + PAD * 2 + messages.length * MG + PAD + 40;
+    let svg = '';
+    const hY = PAD, slY = hY + PH, elY = totalH - PAD;
 
-    const P_WIDTH = 120;
-    const P_HEIGHT = 40;
-    const GAP = 160;
-    const MSG_GAP = 50;
-    const PAD = 40;
-
-    const pPositions = {};
-    participants.forEach((p, i) => {
-        pPositions[p] = PAD + i * GAP + GAP / 2;
+    // Activation tracking
+    const active = {};
+    messages.forEach((m, i) => {
+        if (m.type === 'note') return;
+        if (!active[m.from]) active[m.from] = [];
+        if (!active[m.to]) active[m.to] = [];
+        active[m.from].push(i); active[m.to].push(i);
     });
 
-    const totalW = PAD * 2 + participants.length * GAP;
-    const totalH = P_HEIGHT + PAD * 2 + messages.length * MSG_GAP + PAD + P_HEIGHT + 20;
-
-    let svg = '';
-    const headerY = PAD;
-    const startLifeline = headerY + P_HEIGHT;
-    const endLifeline = totalH - PAD - P_HEIGHT;
-
-    // Draw lifelines
     for (const p of participants) {
-        const x = pPositions[p];
-        // Dashed lifeline
-        svg += `<line x1="${x}" y1="${startLifeline}" x2="${x}" y2="${endLifeline}" stroke="${COLORS.border}" stroke-width="1.5" stroke-dasharray="6,4" />`;
-
-        // Top box
-        const bx = x - P_WIDTH / 2;
-        svg += `<rect x="${bx}" y="${headerY}" width="${P_WIDTH}" height="${P_HEIGHT}" rx="8" fill="${COLORS.primary}" />`;
-        svg += `<text x="${x}" y="${headerY + 25}" text-anchor="middle" font-size="13" font-weight="600" fill="white">${escapeHtml(p)}</text>`;
-
-        // Bottom box
-        svg += `<rect x="${bx}" y="${endLifeline}" width="${P_WIDTH}" height="${P_HEIGHT}" rx="8" fill="${COLORS.primary}" />`;
-        svg += `<text x="${x}" y="${endLifeline + 25}" text-anchor="middle" font-size="13" font-weight="600" fill="white">${escapeHtml(p)}</text>`;
+        const x = pp[p];
+        svg += `<line x1="${x}" y1="${slY}" x2="${x}" y2="${elY}" stroke="${COLORS.border}" stroke-width="1.5" stroke-dasharray="6,4"/>`;
+        // Activation box: thin rect where participant is active
+        const acts = active[p] || [];
+        if (acts.length >= 2) {
+            const startI = acts[0], endI = acts[acts.length - 1];
+            const ay1 = slY + 30 + startI * MG - 5, ay2 = slY + 30 + endI * MG + 5;
+            svg += `<rect x="${x - 5}" y="${ay1}" width="10" height="${ay2 - ay1}" fill="${COLORS.primaryLight}" stroke="${COLORS.primary}" stroke-width="1" rx="2"/>`;
+        }
+        svg += `<rect x="${x - PW / 2}" y="${hY}" width="${PW}" height="${PH}" rx="8" fill="${COLORS.primary}"/>`;
+        svg += `<text x="${x}" y="${hY + 25}" text-anchor="middle" font-size="13" font-weight="600" fill="white">${esc(p)}</text>`;
     }
 
-    // Draw messages
-    let msgY = startLifeline + 30;
+    let msgY = slY + 30;
     for (const msg of messages) {
         if (msg.type === 'note') {
-            const overX = pPositions[msg.over] || totalW / 2;
-            const noteW = measureText(msg.text, 12) + 20;
-            svg += `<rect x="${overX - noteW / 2}" y="${msgY - 15}" width="${noteW}" height="28" rx="4" fill="${COLORS.orangeLight}" stroke="${COLORS.orange}" stroke-width="1" />`;
-            svg += `<text x="${overX}" y="${msgY + 3}" text-anchor="middle" font-size="12" fill="${COLORS.text}">${escapeHtml(msg.text)}</text>`;
-            msgY += MSG_GAP;
-            continue;
+            const ox = pp[msg.over] || totalW / 2, nw = mt(msg.text, 12) + 20;
+            svg += `<rect x="${ox - nw / 2}" y="${msgY - 15}" width="${nw}" height="28" rx="4" fill="${COLORS.orangeLight}" stroke="${COLORS.orange}" stroke-width="1"/>`;
+            svg += `<text x="${ox}" y="${msgY + 3}" text-anchor="middle" font-size="12" fill="${COLORS.text}">${esc(msg.text)}</text>`;
+            msgY += MG; continue;
         }
-
-        const fromX = pPositions[msg.from];
-        const toX = pPositions[msg.to];
-        if (fromX === undefined || toX === undefined) continue;
-
-        const isSelf = msg.from === msg.to;
-        const isDashed = msg.type === '-->' || msg.type === '-->>';
-
-        if (isSelf) {
-            const cx = fromX;
-            const loopW = 40;
-            svg += `<path d="M ${cx} ${msgY} L ${cx + loopW} ${msgY} L ${cx + loopW} ${msgY + 25} L ${cx + 5} ${msgY + 25}" fill="none" stroke="${COLORS.line}" stroke-width="1.5" ${isDashed ? 'stroke-dasharray="6,4"' : ''} marker-end="url(#arrowhead)" />`;
-            svg += `<text x="${cx + loopW + 6}" y="${msgY + 14}" font-size="12" fill="${COLORS.text}">${escapeHtml(msg.text)}</text>`;
+        const fx = pp[msg.from], tx = pp[msg.to];
+        if (fx === undefined || tx === undefined) { msgY += MG; continue; }
+        const self = msg.from === msg.to, dashed = msg.type === '-->' || msg.type === '-->>';
+        if (self) {
+            svg += `<path d="M ${fx} ${msgY} L ${fx + 45} ${msgY} L ${fx + 45} ${msgY + 25} L ${fx + 5} ${msgY + 25}" fill="none" stroke="${COLORS.line}" stroke-width="1.5" ${dashed ? 'stroke-dasharray="6,4"' : ''} marker-end="url(#ah)"/>`;
+            svg += `<text x="${fx + 50}" y="${msgY + 14}" font-size="12" fill="${COLORS.text}">${esc(msg.text)}</text>`;
         } else {
-            svg += `<line x1="${fromX}" y1="${msgY}" x2="${toX}" y2="${msgY}" stroke="${COLORS.line}" stroke-width="1.5" ${isDashed ? 'stroke-dasharray="6,4"' : ''} marker-end="url(#arrowhead)" />`;
-            const mx = (fromX + toX) / 2;
-            svg += `<text x="${mx}" y="${msgY - 8}" text-anchor="middle" font-size="12" fill="${COLORS.text}">${escapeHtml(msg.text)}</text>`;
+            svg += `<line x1="${fx}" y1="${msgY}" x2="${tx}" y2="${msgY}" stroke="${COLORS.line}" stroke-width="1.5" ${dashed ? 'stroke-dasharray="6,4"' : ''} marker-end="url(#ah)"/>`;
+            svg += `<text x="${(fx + tx) / 2}" y="${msgY - 8}" text-anchor="middle" font-size="12" fill="${COLORS.text}">${esc(msg.text)}</text>`;
         }
-        msgY += MSG_GAP;
+        msgY += MG;
     }
-
     return wrapSvg(svg, totalW, totalH);
 }
 
 // ============================================================================
-// ACTIVITY DIAGRAM RENDERER
+// ACTIVITY DIAGRAM
 // ============================================================================
 
 function parseActivityDiagram(code) {
-    const nodes = [];
-    const edges = [];
+    const nodes = [], edges = [];
     const lines = code.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-
-    let id = 0;
-    const nodeMap = {};
-
-    function getOrCreateNode(name, type = 'action') {
-        const key = name.toLowerCase();
-        if (nodeMap[key]) return nodeMap[key];
-        const node = { id: id++, name, type };
-        nodes.push(node);
-        nodeMap[key] = node;
-        return node;
+    let id = 0; const nmap = {};
+    function getNode(name, type = 'action') {
+        const k = name.toLowerCase();
+        if (nmap[k]) return nmap[k];
+        const n = { id: 'n' + (id++), name, type }; nodes.push(n); nmap[k] = n; return n;
     }
-
     for (const line of lines) {
-        // start / end
-        if (line.match(/^\(start\)$/i)) { getOrCreateNode('Start', 'start'); continue; }
-        if (line.match(/^\(end\)$/i)) { getOrCreateNode('End', 'end'); continue; }
-
-        // decision: <condition>
-        const decMatch = line.match(/^<(.+)>$/);
-        if (decMatch) { getOrCreateNode(decMatch[1], 'decision'); continue; }
-
-        // edge: A -> B or A -> B: label
-        const edgeMatch = line.match(/^(.+?)\s*->\s*(.+?)(?:\s*:\s*(.+))?$/);
-        if (edgeMatch) {
-            let fromName = edgeMatch[1].trim();
-            let toName = edgeMatch[2].trim();
-            const label = edgeMatch[3]?.trim() || '';
-
-            let fromType = 'action';
-            let toType = 'action';
-            if (fromName.match(/^\(start\)$/i)) { fromName = 'Start'; fromType = 'start'; }
-            if (fromName.match(/^\(end\)$/i)) { fromName = 'End'; fromType = 'end'; }
-            if (toName.match(/^\(start\)$/i)) { toName = 'Start'; toType = 'start'; }
-            if (toName.match(/^\(end\)$/i)) { toName = 'End'; toType = 'end'; }
-            if (fromName.startsWith('<') && fromName.endsWith('>')) { fromName = fromName.slice(1, -1); fromType = 'decision'; }
-            if (toName.startsWith('<') && toName.endsWith('>')) { toName = toName.slice(1, -1); toType = 'decision'; }
-
-            const from = getOrCreateNode(fromName, fromType);
-            const to = getOrCreateNode(toName, toType);
-            edges.push({ from: from.id, to: to.id, label });
+        if (line.match(/^\(start\)$/i)) { getNode('Start', 'start'); continue; }
+        if (line.match(/^\(end\)$/i)) { getNode('End', 'end'); continue; }
+        if (line.match(/^\[fork\]$/i)) { getNode('Fork', 'fork'); continue; }
+        if (line.match(/^\[join\]$/i)) { getNode('Join', 'join'); continue; }
+        const dm = line.match(/^<(.+)>$/);
+        if (dm) { getNode(dm[1], 'decision'); continue; }
+        const em = line.match(/^(.+?)\s*->\s*(.+?)(?:\s*:\s*(.+))?$/);
+        if (em) {
+            let fn = em[1].trim(), tn = em[2].trim(), lb = em[3]?.trim() || '';
+            let ft = 'action', tt = 'action';
+            if (fn.match(/^\(start\)$/i)) { fn = 'Start'; ft = 'start'; }
+            if (fn.match(/^\(end\)$/i)) { fn = 'End'; ft = 'end'; }
+            if (tn.match(/^\(start\)$/i)) { tn = 'Start'; tt = 'start'; }
+            if (tn.match(/^\(end\)$/i)) { tn = 'End'; tt = 'end'; }
+            if (fn.match(/^\[fork\]$/i)) { fn = 'Fork'; ft = 'fork'; }
+            if (fn.match(/^\[join\]$/i)) { fn = 'Join'; ft = 'join'; }
+            if (tn.match(/^\[fork\]$/i)) { tn = 'Fork'; tt = 'fork'; }
+            if (tn.match(/^\[join\]$/i)) { tn = 'Join'; tt = 'join'; }
+            if (fn.startsWith('<') && fn.endsWith('>')) { fn = fn.slice(1, -1); ft = 'decision'; }
+            if (tn.startsWith('<') && tn.endsWith('>')) { tn = tn.slice(1, -1); tt = 'decision'; }
+            edges.push({ from: getNode(fn, ft).id, to: getNode(tn, tt).id, label: lb });
         }
     }
-
     return { nodes, edges };
 }
 
 function renderActivityDiagram(code) {
     const { nodes, edges } = parseActivityDiagram(code);
-    if (nodes.length === 0) return null;
+    if (!nodes.length) return null;
 
-    const NODE_W = 160;
-    const NODE_H = 40;
-    const DIAMOND = 40;
-    const V_GAP = 70;
-    const H_GAP = 200;
-    const PAD = 50;
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({ rankdir: 'TB', ranksep: 120, nodesep: 80, marginx: 40, marginy: 40 });
+    g.setDefaultEdgeLabel(() => ({}));
 
-    // Simple topological layout
-    const levels = {};
-    const visited = new Set();
-    const adj = {};
-    edges.forEach(e => {
-        if (!adj[e.from]) adj[e.from] = [];
-        adj[e.from].push(e.to);
-    });
+    const nmap = {};
+    nodes.forEach(n => { nmap[n.id] = n; });
 
-    function assignLevel(nodeId, level) {
-        if (visited.has(nodeId)) return;
-        visited.add(nodeId);
-        levels[nodeId] = Math.max(levels[nodeId] || 0, level);
-        (adj[nodeId] || []).forEach(child => assignLevel(child, level + 1));
+    for (const n of nodes) {
+        let w, h;
+        if (n.type === 'start' || n.type === 'end') {
+            w = 36; h = 36;
+        } else if (n.type === 'decision') {
+            const ds = Math.max(60, mt(n.name, 12) + 36);
+            w = ds; h = ds;
+        } else if (n.type === 'fork' || n.type === 'join') {
+            w = 160; h = 8;
+        } else {
+            w = Math.max(140, mt(n.name, 13) + 40); h = 40;
+        }
+        g.setNode(n.id, { label: n.name, width: w, height: h });
     }
 
-    // Start from nodes with no incoming edges
-    const hasIncoming = new Set(edges.map(e => e.to));
-    nodes.forEach(n => {
-        if (!hasIncoming.has(n.id)) assignLevel(n.id, 0);
-    });
-    // Assign remaining
-    nodes.forEach(n => {
-        if (!visited.has(n.id)) assignLevel(n.id, Object.keys(levels).length);
-    });
-
-    // Group by level
-    const levelGroups = {};
-    nodes.forEach(n => {
-        const lvl = levels[n.id] || 0;
-        if (!levelGroups[lvl]) levelGroups[lvl] = [];
-        levelGroups[lvl].push(n);
-    });
-
-    const maxLevel = Math.max(...Object.keys(levelGroups).map(Number));
-    const maxNodesInLevel = Math.max(...Object.values(levelGroups).map(g => g.length));
-
-    const totalW = maxNodesInLevel * H_GAP + PAD * 2;
-    const totalH = (maxLevel + 1) * V_GAP + PAD * 2 + NODE_H;
-
-    // Assign positions
-    const positions = {};
-    for (let lvl = 0; lvl <= maxLevel; lvl++) {
-        const group = levelGroups[lvl] || [];
-        const startX = (totalW - group.length * H_GAP) / 2 + H_GAP / 2;
-        group.forEach((n, i) => {
-            positions[n.id] = {
-                x: startX + i * H_GAP,
-                y: PAD + lvl * V_GAP + NODE_H / 2
-            };
-        });
+    for (const e of edges) {
+        g.setEdge(e.from, e.to, { label: e.label || '' });
     }
+
+    dagre.layout(g);
+
+    const graphInfo = g.graph();
+    const totalW = Math.max(graphInfo.width + 80, 400);
+    const totalH = Math.max(graphInfo.height + 80, 300);
 
     let svg = '';
 
-    // Draw edges
-    for (const edge of edges) {
-        const from = positions[edge.from];
-        const to = positions[edge.to];
-        if (!from || !to) continue;
+    for (const n of nodes) {
+        const nd = g.node(n.id);
+        if (!nd) continue;
+        const { x, y } = nd;
 
-        if (from.x === to.x) {
-            svg += `<line x1="${from.x}" y1="${from.y + NODE_H / 2}" x2="${to.x}" y2="${to.y - NODE_H / 2}" stroke="${COLORS.line}" stroke-width="1.5" marker-end="url(#arrowhead)" />`;
+        if (n.type === 'start') {
+            svg += `<circle cx="${x}" cy="${y}" r="14" fill="${COLORS.text}"/>`;
+        } else if (n.type === 'end') {
+            svg += `<circle cx="${x}" cy="${y}" r="16" fill="none" stroke="${COLORS.text}" stroke-width="3"/>`;
+            svg += `<circle cx="${x}" cy="${y}" r="9" fill="${COLORS.text}"/>`;
+        } else if (n.type === 'decision') {
+            const ds = Math.max(60, mt(n.name, 12) + 36), hd = ds / 2;
+            svg += `<polygon points="${x},${y - hd} ${x + hd},${y} ${x},${y + hd} ${x - hd},${y}" fill="${COLORS.orangeLight}" stroke="${COLORS.orange}" stroke-width="2"/>`;
+            svg += `<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="12" font-weight="600" fill="${COLORS.text}">${esc(n.name)}</text>`;
+        } else if (n.type === 'fork' || n.type === 'join') {
+            const bw = nd.width, bh = 6;
+            svg += `<rect x="${x - bw / 2}" y="${y - bh / 2}" width="${bw}" height="${bh}" rx="2" fill="${COLORS.text}"/>`;
         } else {
-            const midY = (from.y + NODE_H / 2 + to.y - NODE_H / 2) / 2;
-            svg += `<path d="M ${from.x} ${from.y + NODE_H / 2} L ${from.x} ${midY} L ${to.x} ${midY} L ${to.x} ${to.y - NODE_H / 2}" fill="none" stroke="${COLORS.line}" stroke-width="1.5" marker-end="url(#arrowhead)" />`;
-        }
-        if (edge.label) {
-            const mx = (from.x + to.x) / 2;
-            const my = (from.y + to.y) / 2;
-            svg += `<text x="${mx + 6}" y="${my}" font-size="11" fill="${COLORS.textLight}">${escapeHtml(edge.label)}</text>`;
+            const w = nd.width, h = nd.height;
+            svg += `<rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="20" fill="${COLORS.primaryLight}" stroke="${COLORS.primary}" stroke-width="2"/>`;
+            svg += `<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13" font-weight="600" fill="${COLORS.text}">${esc(n.name)}</text>`;
         }
     }
 
-    // Draw nodes
-    for (const node of nodes) {
-        const pos = positions[node.id];
-        if (!pos) continue;
-        const { x, y } = pos;
+    // Helper: clip a point to diamond boundary
+    function clipToDiamond(cx, cy, halfSize, fromX, fromY) {
+        const dx = fromX - cx, dy = fromY - cy;
+        if (dx === 0 && dy === 0) return { x: cx, y: cy - halfSize };
+        const absDx = Math.abs(dx), absDy = Math.abs(dy);
+        const sum = absDx + absDy;
+        if (sum === 0) return { x: cx, y: cy - halfSize };
+        const scale = halfSize / sum;
+        return { x: cx + dx * scale, y: cy + dy * scale };
+    }
 
-        if (node.type === 'start') {
-            svg += `<circle cx="${x}" cy="${y}" r="16" fill="${COLORS.text}" />`;
-        } else if (node.type === 'end') {
-            svg += `<circle cx="${x}" cy="${y}" r="16" fill="none" stroke="${COLORS.text}" stroke-width="3" />`;
-            svg += `<circle cx="${x}" cy="${y}" r="10" fill="${COLORS.text}" />`;
-        } else if (node.type === 'decision') {
-            svg += `<polygon points="${x},${y - DIAMOND / 2} ${x + DIAMOND / 2},${y} ${x},${y + DIAMOND / 2} ${x - DIAMOND / 2},${y}" fill="${COLORS.orangeLight}" stroke="${COLORS.orange}" stroke-width="2" />`;
-            svg += `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="11" font-weight="600" fill="${COLORS.text}">${escapeHtml(node.name)}</text>`;
+    for (const e of edges) {
+        const edgeData = g.edge(e.from, e.to);
+        if (!edgeData || !edgeData.points) continue;
+        const pts = edgeData.points.map(p => ({ x: p.x, y: p.y }));
+
+        // Clip start point to source diamond boundary
+        const fromNode = nmap[e.from];
+        if (fromNode && fromNode.type === 'decision') {
+            const nd = g.node(e.from);
+            const ds = Math.max(60, mt(fromNode.name, 12) + 36);
+            const nextPt = pts[1] || pts[pts.length - 1];
+            pts[0] = clipToDiamond(nd.x, nd.y, ds / 2, nextPt.x, nextPt.y);
+        }
+
+        // Clip end point to target diamond boundary
+        const toNode = nmap[e.to];
+        if (toNode && toNode.type === 'decision') {
+            const nd = g.node(e.to);
+            const ds = Math.max(60, mt(toNode.name, 12) + 36);
+            const prevPt = pts[pts.length - 2] || pts[0];
+            pts[pts.length - 1] = clipToDiamond(nd.x, nd.y, ds / 2, prevPt.x, prevPt.y);
+        }
+
+        if (pts.length >= 3) {
+            let d = `M ${pts[0].x} ${pts[0].y}`;
+            for (let i = 1; i < pts.length - 1; i += 2) {
+                const cp = pts[i];
+                const next = pts[i + 1] || pts[pts.length - 1];
+                d += ` Q ${cp.x} ${cp.y} ${next.x} ${next.y}`;
+            }
+            if (pts.length % 2 === 0) {
+                d += ` L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
+            }
+            svg += `<path d="${d}" fill="none" stroke="${COLORS.line}" stroke-width="1.5" marker-end="url(#ah)"/>`;
         } else {
-            const w = Math.max(NODE_W, measureText(node.name, 14) + 32);
-            svg += `<rect x="${x - w / 2}" y="${y - NODE_H / 2}" width="${w}" height="${NODE_H}" rx="20" fill="${COLORS.primaryLight}" stroke="${COLORS.primary}" stroke-width="2" />`;
-            svg += `<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="13" font-weight="500" fill="${COLORS.text}">${escapeHtml(node.name)}</text>`;
+            svg += `<line x1="${pts[0].x}" y1="${pts[0].y}" x2="${pts[pts.length - 1].x}" y2="${pts[pts.length - 1].y}" stroke="${COLORS.line}" stroke-width="1.5" marker-end="url(#ah)"/>`;
+        }
+
+        if (e.label) {
+            const lp = pts[1] || pts[0];
+            svg += `<text x="${lp.x + 10}" y="${lp.y + 4}" font-size="11" fill="${COLORS.textLight}">${esc(e.label)}</text>`;
         }
     }
 
@@ -526,413 +506,515 @@ function renderActivityDiagram(code) {
 }
 
 // ============================================================================
-// USE CASE DIAGRAM RENDERER
+// USE CASE DIAGRAM
 // ============================================================================
 
 function parseUseCaseDiagram(code) {
-    const actors = [];
-    const usecases = [];
-    const relations = [];
+    const actors = [], usecases = [], relations = [];
+    let systemName = 'System';
     const lines = code.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-
     for (const line of lines) {
-        const actorMatch = line.match(/^actor\s+(.+)$/i);
-        if (actorMatch) { actors.push(actorMatch[1].replace(/"/g, '').trim()); continue; }
-
-        const ucMatch = line.match(/^usecase\s+(.+)$/i);
-        if (ucMatch) { usecases.push(ucMatch[1].replace(/"/g, '').trim()); continue; }
-
-        const relMatch = line.match(/^(.+?)\s*(-->|--|->)\s*(.+?)(?:\s*:\s*(.+))?$/);
-        if (relMatch) {
-            const from = relMatch[1].replace(/"/g, '').trim();
-            const to = relMatch[3].replace(/"/g, '').trim();
+        const sm = line.match(/^system\s+["']?(.+?)["']?\s*$/i);
+        if (sm) { systemName = sm[1]; continue; }
+        const am = line.match(/^actor\s+(.+)$/i);
+        if (am) { const n = am[1].replace(/"/g, '').trim(); if (!actors.includes(n)) actors.push(n); continue; }
+        const um = line.match(/^usecase\s+(.+)$/i);
+        if (um) { const n = um[1].replace(/"/g, '').trim(); if (!usecases.includes(n)) usecases.push(n); continue; }
+        // Relations: A -> B, A ..> B : <<include>>, A ..> B : <<extend>>
+        const rm = line.match(/^(.+?)\s*(->|\.\.>)\s*(.+?)(?:\s*:\s*(.+))?$/);
+        if (rm) {
+            const from = rm[1].replace(/"/g, '').trim(), to = rm[3].replace(/"/g, '').trim();
+            const label = rm[4]?.trim() || '', type = rm[2];
             if (!actors.includes(from) && !usecases.includes(from)) {
-                if (line.toLowerCase().includes('actor') || from.match(/^[A-Z][a-z]+$/)) {
-                    actors.push(from);
-                } else {
-                    usecases.push(from);
-                }
+                if (actors.length === 0 || label.includes('include') || label.includes('extend')) usecases.push(from);
+                else if (type === '..>') usecases.push(from);
+                else actors.push(from);
             }
-            if (!actors.includes(to) && !usecases.includes(to)) {
-                usecases.push(to);
-            }
-            relations.push({ from, to, label: relMatch[4]?.trim() || '', type: relMatch[2] });
+            if (!actors.includes(to) && !usecases.includes(to)) usecases.push(to);
+            relations.push({ from, to, label, type });
         }
     }
-
-    return { actors: [...new Set(actors)], usecases: [...new Set(usecases)], relations };
+    return { actors: [...new Set(actors)], usecases: [...new Set(usecases)], relations, systemName };
 }
 
 function renderUseCaseDiagram(code) {
-    const { actors, usecases, relations } = parseUseCaseDiagram(code);
-    if (actors.length === 0 && usecases.length === 0) return null;
+    const { actors, usecases, relations, systemName } = parseUseCaseDiagram(code);
+    if (!actors.length && !usecases.length) return null;
+    const UCW = 160, UCH = 50, PAD = 80, GV = 90, AA = 160;
+    const ucC = Math.max(usecases.length, 1);
+    const totalH = PAD * 2 + ucC * GV + 60, totalW = AA * 2 + UCW + PAD * 3;
 
-    const UC_W = 160;
-    const UC_H = 50;
-    const ACTOR_H = 80;
-    const PAD = 60;
-    const GAP_V = 80;
-    const ACTOR_AREA = 120;
-
-    const halfActors = Math.ceil(actors.length / 2);
-    const ucCount = Math.max(usecases.length, 1);
-
-    const totalH = PAD * 2 + Math.max(actors.length, ucCount) * GAP_V;
-    const totalW = ACTOR_AREA + UC_W + PAD * 3 + ACTOR_AREA;
-
-    const positions = {};
-
-    // Left actors
-    for (let i = 0; i < halfActors; i++) {
-        positions[actors[i]] = {
-            x: PAD + ACTOR_AREA / 2,
-            y: PAD + i * GAP_V + GAP_V / 2,
-            type: 'actor'
-        };
-    }
-
-    // Right actors
-    for (let i = halfActors; i < actors.length; i++) {
-        positions[actors[i]] = {
-            x: totalW - PAD - ACTOR_AREA / 2,
-            y: PAD + (i - halfActors) * GAP_V + GAP_V / 2,
-            type: 'actor'
-        };
-    }
-
-    // Use cases in center
-    const ucStartY = (totalH - ucCount * GAP_V) / 2 + GAP_V / 2;
+    const pos = {};
+    // Place use cases in center
+    const ucSY = (totalH - ucC * GV) / 2 + GV / 2;
     usecases.forEach((uc, i) => {
-        positions[uc] = {
-            x: totalW / 2,
-            y: ucStartY + i * GAP_V,
-            type: 'usecase'
-        };
+        const w = Math.max(UCW, mt(uc, 13) + 40);
+        pos[uc] = { x: totalW / 2, y: ucSY + i * GV, type: 'uc', w, h: UCH };
+    });
+
+    // Place actors
+    const actConn = {};
+    for (const r of relations) {
+        if (actors.includes(r.from) && pos[r.to]) { if (!actConn[r.from]) actConn[r.from] = []; actConn[r.from].push(pos[r.to].y); }
+        if (actors.includes(r.to) && pos[r.from]) { if (!actConn[r.to]) actConn[r.to] = []; actConn[r.to].push(pos[r.from].y); }
+    }
+    const half = Math.ceil(actors.length / 2);
+    actors.forEach((a, i) => {
+        const isL = i < half, x = isL ? PAD + AA / 2 : totalW - PAD - AA / 2;
+        let y = actConn[a]?.length ? actConn[a].reduce((a, b) => a + b, 0) / actConn[a].length : PAD + (isL ? i : i - half) * GV + GV / 2;
+        pos[a] = { x, y, type: 'actor', w: 32, h: 60 };
     });
 
     let svg = '';
-
     // System boundary
-    const sysX = ACTOR_AREA + PAD;
-    const sysW = totalW - 2 * (ACTOR_AREA + PAD);
-    svg += `<rect x="${sysX}" y="${PAD / 2}" width="${sysW}" height="${totalH - PAD}" rx="12" fill="none" stroke="${COLORS.border}" stroke-width="2" stroke-dasharray="8,4" />`;
-    svg += `<text x="${sysX + sysW / 2}" y="${PAD / 2 + 20}" text-anchor="middle" font-size="14" font-weight="600" fill="${COLORS.textLight}">System</text>`;
+    const sX = AA + PAD, sW = totalW - 2 * (AA + PAD);
+    svg += `<rect x="${sX}" y="${PAD / 2}" width="${sW}" height="${totalH - PAD}" rx="12" fill="none" stroke="${COLORS.border}" stroke-width="2" stroke-dasharray="8,4"/>`;
+    svg += `<text x="${sX + sW / 2}" y="${PAD / 2 + 24}" text-anchor="middle" font-size="16" font-weight="700" fill="${COLORS.text}">${esc(systemName)}</text>`;
 
-    // Draw relations
-    for (const rel of relations) {
-        const from = positions[rel.from];
-        const to = positions[rel.to];
-        if (!from || !to) continue;
-        svg += `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${COLORS.border}" stroke-width="1.5" />`;
-        if (rel.label) {
-            svg += `<text x="${(from.x + to.x) / 2}" y="${(from.y + to.y) / 2 - 6}" text-anchor="middle" font-size="10" fill="${COLORS.textLight}">${escapeHtml(rel.label)}</text>`;
+    // Actors
+    for (const a of actors) {
+        const p = pos[a]; if (!p) continue;
+        const { x, y } = p;
+        svg += `<circle cx="${x}" cy="${y - 24}" r="12" fill="none" stroke="${COLORS.primary}" stroke-width="2"/>`;
+        svg += `<line x1="${x}" y1="${y - 12}" x2="${x}" y2="${y + 10}" stroke="${COLORS.primary}" stroke-width="2"/>`;
+        svg += `<line x1="${x - 16}" y1="${y - 2}" x2="${x + 16}" y2="${y - 2}" stroke="${COLORS.primary}" stroke-width="2"/>`;
+        svg += `<line x1="${x}" y1="${y + 10}" x2="${x - 14}" y2="${y + 28}" stroke="${COLORS.primary}" stroke-width="2"/>`;
+        svg += `<line x1="${x}" y1="${y + 10}" x2="${x + 14}" y2="${y + 28}" stroke="${COLORS.primary}" stroke-width="2"/>`;
+        svg += `<text x="${x}" y="${y + 44}" text-anchor="middle" font-size="12" font-weight="500" fill="${COLORS.text}">${esc(a)}</text>`;
+    }
+    // Use cases
+    for (const uc of usecases) {
+        const p = pos[uc]; if (!p) continue;
+        const { x, y, w } = p;
+        svg += `<ellipse cx="${x}" cy="${y}" rx="${w / 2}" ry="${UCH / 2}" fill="${COLORS.primaryLight}" stroke="${COLORS.primary}" stroke-width="2"/>`;
+        // Multi-line text if needed
+        const words = uc.split(' ');
+        if (words.length > 2 && mt(uc, 13) > w - 20) {
+            const m = Math.ceil(words.length / 2);
+            svg += `<text x="${x}" y="${y - 3}" text-anchor="middle" font-size="13" font-weight="500" fill="${COLORS.text}">${esc(words.slice(0, m).join(' '))}</text>`;
+            svg += `<text x="${x}" y="${y + 13}" text-anchor="middle" font-size="13" font-weight="500" fill="${COLORS.text}">${esc(words.slice(m).join(' '))}</text>`;
+        } else {
+            svg += `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="13" font-weight="500" fill="${COLORS.text}">${esc(uc)}</text>`;
         }
     }
-
-    // Draw actors (stick figures)
-    for (const actor of actors) {
-        const pos = positions[actor];
-        if (!pos) continue;
-        const { x, y } = pos;
-        // Head
-        svg += `<circle cx="${x}" cy="${y - 24}" r="12" fill="none" stroke="${COLORS.primary}" stroke-width="2" />`;
-        // Body
-        svg += `<line x1="${x}" y1="${y - 12}" x2="${x}" y2="${y + 10}" stroke="${COLORS.primary}" stroke-width="2" />`;
-        // Arms
-        svg += `<line x1="${x - 16}" y1="${y - 2}" x2="${x + 16}" y2="${y - 2}" stroke="${COLORS.primary}" stroke-width="2" />`;
-        // Legs
-        svg += `<line x1="${x}" y1="${y + 10}" x2="${x - 14}" y2="${y + 28}" stroke="${COLORS.primary}" stroke-width="2" />`;
-        svg += `<line x1="${x}" y1="${y + 10}" x2="${x + 14}" y2="${y + 28}" stroke="${COLORS.primary}" stroke-width="2" />`;
-        // Name
-        svg += `<text x="${x}" y="${y + 44}" text-anchor="middle" font-size="12" font-weight="500" fill="${COLORS.text}">${escapeHtml(actor)}</text>`;
+    // Relations
+    for (const r of relations) {
+        const f = pos[r.from], t = pos[r.to]; if (!f || !t) continue;
+        let fx = f.x, fy = f.y, tx = t.x, ty = t.y;
+        if (f.type === 'actor') { fx = t.x > f.x ? f.x + 16 : f.x - 16; fy = f.y - 2; }
+        if (t.type === 'uc') {
+            const rx = (t.w || UCW) / 2, ry = UCH / 2, ang = Math.atan2(fy - t.y, fx - t.x);
+            tx = t.x + rx * Math.cos(ang); ty = t.y + ry * Math.sin(ang);
+        }
+        if (f.type === 'uc') {
+            const rx = (f.w || UCW) / 2, ry = UCH / 2, ang = Math.atan2(ty - f.y, tx - f.x);
+            fx = f.x + rx * Math.cos(ang); fy = f.y + ry * Math.sin(ang);
+        }
+        const dash = r.type === '..>' ? 'stroke-dasharray="6,4"' : '';
+        const marker = r.type === '..>' ? 'marker-end="url(#ah-open)"' : '';
+        svg += `<line x1="${fx}" y1="${fy}" x2="${tx}" y2="${ty}" stroke="${COLORS.border}" stroke-width="1.5" ${dash} ${marker}/>`;
+        if (r.label) {
+            const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+            svg += `<text x="${mx}" y="${my - 6}" text-anchor="middle" font-size="10" font-style="italic" fill="${COLORS.textLight}">${esc(r.label)}</text>`;
+        }
     }
-
-    // Draw use cases (ovals)
-    for (const uc of usecases) {
-        const pos = positions[uc];
-        if (!pos) continue;
-        const { x, y } = pos;
-        const w = Math.max(UC_W, measureText(uc, 13) + 40);
-        svg += `<ellipse cx="${x}" cy="${y}" rx="${w / 2}" ry="${UC_H / 2}" fill="${COLORS.primaryLight}" stroke="${COLORS.primary}" stroke-width="2" />`;
-        svg += `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="13" font-weight="500" fill="${COLORS.text}">${escapeHtml(uc)}</text>`;
-    }
-
     return wrapSvg(svg, totalW, totalH);
 }
 
 // ============================================================================
-// ER DIAGRAM RENDERER
+// ER DIAGRAM — Chen Notation
 // ============================================================================
 
 function parseERDiagram(code) {
-    const entities = [];
-    const relations = [];
+    const entities = [], relationships = [];
     const lines = code.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-
-    let currentEntity = null;
-
+    let cur = null;
     for (const line of lines) {
-        const entityMatch = line.match(/^entity\s+(.+?)(?:\s*\{)?\s*$/i);
-        if (entityMatch) {
-            currentEntity = { name: entityMatch[1].replace(/"/g, '').trim(), attributes: [] };
-            entities.push(currentEntity);
+        const em = line.match(/^entity\s+(.+?)(?:\s*\{)?\s*$/i);
+        if (em) { cur = { name: em[1].replace(/"/g, '').trim(), attrs: [] }; entities.push(cur); continue; }
+        if (line === '}') { cur = null; continue; }
+        if (cur && line) {
+            const isPK = line.startsWith('*'), isFK = line.startsWith('+');
+            const clean = line.replace(/^[*+]\s*/, '').trim();
+            const parts = clean.split(':').map(s => s.trim());
+            cur.attrs.push({ name: parts[0], type: parts[1] || '', isPK, isFK });
             continue;
         }
-
-        if (line === '}') { currentEntity = null; continue; }
-
-        if (currentEntity) {
-            const attrMatch = line.match(/^([*+\-~]?)\s*(.+?)(?:\s*:\s*(.+))?\s*$/);
-            if (attrMatch) {
-                const prefix = attrMatch[1];
-                const name = attrMatch[2].trim();
-                const type = attrMatch[3]?.trim() || '';
-                currentEntity.attributes.push({
-                    name,
-                    type,
-                    isPK: prefix === '*',
-                    isFK: prefix === '+',
-                });
-            }
+        // Relationship: Entity1 -- RelName -- Entity2 : leftCard,rightCard
+        const rm = line.match(/^(.+?)\s+--\s+(.+?)\s+--\s+(.+?)(?:\s*:\s*(.+))?$/);
+        if (rm) {
+            const cards = (rm[4] || '').split(',').map(s => s.trim());
+            relationships.push({ from: rm[1].replace(/"/g, '').trim(), name: rm[2].replace(/"/g, '').trim(), to: rm[3].replace(/"/g, '').trim(), cardFrom: cards[0] || '', cardTo: cards[1] || '' });
             continue;
         }
-
-        // Relation: Entity1 ||--o{ Entity2 : label  or simpler: Entity1 -- Entity2 : label
-        const relMatch = line.match(/^(.+?)\s*([\|o\{}<>]{0,4}--[\|o\{}<>]{0,4}|--)\s*(.+?)(?:\s*:\s*(.+))?$/i);
-        if (relMatch) {
-            relations.push({
-                from: relMatch[1].trim(),
-                to: relMatch[3].trim(),
-                cardinality: relMatch[2],
-                label: relMatch[4]?.trim() || ''
-            });
+        // Old-style: Entity1 ||--o{ Entity2 : label
+        const om = line.match(/^(.+?)\s+([\|o\{]+--[\|o\{]+)\s+(.+?)(?:\s*:\s*(.+))?$/);
+        if (om) {
+            const c = om[2];
+            let cf = '1', ct = 'M';
+            if (c.includes('||')) cf = '1'; if (c.includes('o{')) ct = 'M'; if (c.includes('|{')) ct = '1..M';
+            relationships.push({ from: om[1].trim(), name: om[4] || '', to: om[3].trim(), cardFrom: cf, cardTo: ct });
         }
     }
-
-    return { entities, relations };
+    return { entities, relationships };
 }
 
 function renderERDiagram(code) {
-    const { entities, relations } = parseERDiagram(code);
-    if (entities.length === 0) return null;
+    const { entities, relationships } = parseERDiagram(code);
+    if (!entities.length) return null;
 
-    const PAD = 40;
-    const HEADER_H = 38;
-    const ROW_H = 26;
-    const MIN_W = 180;
-    const GAP = 80;
+    const EW = 140, EH = 48, AH = 28, DH = 55;
+    const ATTR_GAP = 55;
 
-    const boxes = entities.map(entity => {
-        const nameW = measureText(entity.name, 15) + 40;
-        const attrW = entity.attributes.reduce((max, a) => {
-            const txt = `${a.isPK ? 'PK ' : a.isFK ? 'FK ' : ''}${a.name}${a.type ? ': ' + a.type : ''}`;
-            return Math.max(max, measureText(txt, 12) + 40);
-        }, 0);
-        const w = Math.max(MIN_W, nameW, attrW);
-        const h = HEADER_H + entity.attributes.length * ROW_H + 8;
-        return { ...entity, w, h };
+    // Pre-compute attribute layout info for each entity
+    const eInfo = {};
+    for (const e of entities) {
+        const pks = e.attrs.filter(a => a.isPK);
+        const fks = e.attrs.filter(a => a.isFK);
+        const regs = e.attrs.filter(a => !a.isPK && !a.isFK);
+        const pkSpread = pks.length <= 1 ? 0 : Math.max(105, Math.min(120, 400 / pks.length));
+        const regSpread = regs.length <= 1 ? 0 : Math.max(105, Math.min(120, 500 / regs.length));
+        const entW = Math.max(EW, mt(e.name, 14) + 40);
+
+        // Width needed: max of entity, pk fan, reg fan, plus FK space
+        const pkFanW = pks.length > 0 ? (pks.length - 1) * pkSpread + 110 : 0;
+        const regFanW = regs.length > 0 ? (regs.length - 1) * regSpread + 110 : 0;
+        const fkSpace = fks.length > 0 ? 120 : 0;
+        const fullW = Math.max(entW, pkFanW, regFanW) + fkSpace;
+
+        // Height needed: PK space above + entity + reg space below
+        const aboveH = pks.length > 0 ? ATTR_GAP + 40 + AH / 2 : 0;
+        const belowH = regs.length > 0 ? ATTR_GAP + 40 + AH / 2 : 0;
+        const fullH = aboveH + EH + belowH;
+
+        eInfo[e.name] = { pks, fks, regs, pkSpread, regSpread, entW, fullW, fullH, aboveH, belowH };
+    }
+
+    // Dagre layout with inflated node sizes
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({ rankdir: "LR", ranksep: 120, nodesep: 40, marginx: 40, marginy: 40 });
+    g.setDefaultEdgeLabel(() => ({}));
+
+    for (const e of entities) {
+        const info = eInfo[e.name];
+        g.setNode("e_" + e.name, { label: e.name, width: info.fullW, height: info.fullH });
+    }
+
+    relationships.forEach((r, ri) => {
+        const dId = "r_" + ri;
+        const dw = Math.max(100, mt(r.name, 13) + 36);
+        g.setNode(dId, { label: r.name, width: dw, height: DH });
+        if (r.from === r.to) {
+            g.setEdge("e_" + r.from, dId, { minlen: 2 });
+            g.setEdge(dId, "e_" + r.to, { minlen: 2 });
+        } else {
+            g.setEdge("e_" + r.from, dId);
+            g.setEdge(dId, "e_" + r.to);
+        }
     });
 
-    const cols = Math.min(boxes.length, 3);
-    const rows = Math.ceil(boxes.length / cols);
+    dagre.layout(g);
 
-    const colWidths = [];
-    for (let c = 0; c < cols; c++) {
-        let maxW = 0;
-        for (let r = 0; r < rows; r++) {
-            const idx = r * cols + c;
-            if (idx < boxes.length) maxW = Math.max(maxW, boxes[idx].w);
-        }
-        colWidths.push(maxW);
+    // Compute viewBox from graph bounds
+    const graphInfo = g.graph();
+    const pad = 50;
+    const totalW = Math.max((graphInfo.width || 400) + pad * 2, 400);
+    const totalH = Math.max((graphInfo.height || 300) + pad * 2, 300);
+
+    let svg = "";
+
+    // Draw entities and their attributes
+    for (const e of entities) {
+        const nd = g.node("e_" + e.name);
+        if (!nd) continue;
+        const info = eInfo[e.name];
+        // Entity center: Dagre gives us the center of the inflated bounding box
+        // The actual entity rect sits offset by aboveH from the top
+        const cx = nd.x + (info.fks.length > 0 ? 30 : 0);
+        const cy = nd.y - info.fullH / 2 + info.aboveH + EH / 2;
+        const w = info.entW;
+
+        svg += '<rect x="' + (cx - w / 2) + '" y="' + (cy - EH / 2) + '" width="' + w + '" height="' + EH + '" fill="' + COLORS.primaryLight + '" stroke="' + COLORS.primary + '" stroke-width="2"/>';
+        svg += '<text x="' + cx + '" y="' + (cy + 5) + '" text-anchor="middle" font-size="14" font-weight="700" fill="' + COLORS.text + '">' + esc(e.name) + '</text>';
+
+        // PK attributes: ABOVE
+        info.pks.forEach((a, ai) => {
+            const ax = cx + (ai - (info.pks.length - 1) / 2) * info.pkSpread;
+            const ay = cy - ATTR_GAP - 35;
+            const aw = Math.max(75, mt(a.name, 11) + 22);
+            svg += '<line x1="' + cx + '" y1="' + (cy - EH / 2) + '" x2="' + ax + '" y2="' + (ay + AH / 2) + '" stroke="' + COLORS.border + '" stroke-width="1.5"/>';
+            svg += '<ellipse cx="' + ax + '" cy="' + ay + '" rx="' + (aw / 2) + '" ry="' + (AH / 2) + '" fill="' + COLORS.accentLight + '" stroke="' + COLORS.accent + '" stroke-width="1.5"/>';
+            svg += '<text x="' + ax + '" y="' + (ay + 4) + '" text-anchor="middle" font-size="11" font-weight="600" fill="' + COLORS.text + '" text-decoration="underline">' + esc(a.name) + '</text>';
+        });
+
+        // FK attributes: LEFT
+        info.fks.forEach((a, ai) => {
+            const ax = cx - w / 2 - ATTR_GAP - 15;
+            const ay = cy + (ai - (info.fks.length - 1) / 2) * 34;
+            const aw = Math.max(75, mt(a.name, 11) + 22);
+            svg += '<line x1="' + (cx - w / 2) + '" y1="' + cy + '" x2="' + (ax + aw / 2) + '" y2="' + ay + '" stroke="' + COLORS.accent + '" stroke-width="1.5" stroke-dasharray="5,3"/>';
+            svg += '<ellipse cx="' + ax + '" cy="' + ay + '" rx="' + (aw / 2) + '" ry="' + (AH / 2) + '" fill="' + COLORS.bg + '" stroke="' + COLORS.accent + '" stroke-width="1.5" stroke-dasharray="5,3"/>';
+            svg += '<text x="' + ax + '" y="' + (ay + 4) + '" text-anchor="middle" font-size="11" fill="' + COLORS.text + '">' + esc(a.name) + '</text>';
+        });
+
+        // Regular attributes: BELOW
+        info.regs.forEach((a, ai) => {
+            const ax = cx + (ai - (info.regs.length - 1) / 2) * info.regSpread;
+            const ay = cy + ATTR_GAP + 35;
+            const aw = Math.max(75, mt(a.name, 11) + 22);
+            svg += '<line x1="' + cx + '" y1="' + (cy + EH / 2) + '" x2="' + ax + '" y2="' + (ay - AH / 2) + '" stroke="' + COLORS.border + '" stroke-width="1.5"/>';
+            svg += '<ellipse cx="' + ax + '" cy="' + ay + '" rx="' + (aw / 2) + '" ry="' + (AH / 2) + '" fill="' + COLORS.bg + '" stroke="' + COLORS.border + '" stroke-width="1.5"/>';
+            svg += '<text x="' + ax + '" y="' + (ay + 4) + '" text-anchor="middle" font-size="11" fill="' + COLORS.text + '">' + esc(a.name) + '</text>';
+        });
     }
 
-    const rowHeights = [];
-    for (let r = 0; r < rows; r++) {
-        let maxH = 0;
-        for (let c = 0; c < cols; c++) {
-            const idx = r * cols + c;
-            if (idx < boxes.length) maxH = Math.max(maxH, boxes[idx].h);
+    // Draw relationship diamonds and connection lines
+    relationships.forEach((r, ri) => {
+        const dId = "r_" + ri;
+        const dNode = g.node(dId);
+        const fNode = g.node("e_" + r.from);
+        const tNode = g.node("e_" + r.to);
+        if (!dNode || !fNode || !tNode) return;
+
+        const fInfo = eInfo[r.from], tInfo = eInfo[r.to];
+        const dx = dNode.x, dy = dNode.y;
+        const dw = dNode.width, dh = DH;
+
+        // Entity centers (accounting for above offset and FK shift)
+        const fx = fNode.x + (fInfo.fks.length > 0 ? 30 : 0);
+        const fy = fNode.y - fInfo.fullH / 2 + fInfo.aboveH + EH / 2;
+        const tx = tNode.x + (tInfo.fks.length > 0 ? 30 : 0);
+        const ty = tNode.y - tInfo.fullH / 2 + tInfo.aboveH + EH / 2;
+        const fW = fInfo.entW, tW = tInfo.entW;
+
+        let fEdgeX, fEdgeY, tEdgeX, tEdgeY;
+        if (r.from === r.to) {
+            fEdgeX = fx + fW / 2; fEdgeY = fy - EH / 4;
+            tEdgeX = tx + tW / 2; tEdgeY = ty + EH / 4;
+        } else {
+            fEdgeX = fx + fW / 2; fEdgeY = fy;
+            tEdgeX = tx - tW / 2; tEdgeY = ty;
         }
-        rowHeights.push(maxH);
-    }
 
-    let totalW = PAD * 2;
-    for (const cw of colWidths) totalW += cw + GAP;
-    totalW -= GAP;
+        svg += '<line x1="' + fEdgeX + '" y1="' + fEdgeY + '" x2="' + (dx - dw / 2) + '" y2="' + dy + '" stroke="' + COLORS.border + '" stroke-width="1.5"/>';
+        svg += '<line x1="' + (dx + dw / 2) + '" y1="' + dy + '" x2="' + tEdgeX + '" y2="' + tEdgeY + '" stroke="' + COLORS.border + '" stroke-width="1.5"/>';
 
-    let totalH = PAD * 2;
-    for (const rh of rowHeights) totalH += rh + GAP;
-    totalH -= GAP;
+        svg += '<polygon points="' + dx + ',' + (dy - dh / 2) + ' ' + (dx + dw / 2) + ',' + dy + ' ' + dx + ',' + (dy + dh / 2) + ' ' + (dx - dw / 2) + ',' + dy + '" fill="' + COLORS.greenLight + '" stroke="' + COLORS.green + '" stroke-width="2"/>';
+        svg += '<text x="' + dx + '" y="' + (dy + 5) + '" text-anchor="middle" font-size="13" font-weight="600" fill="' + COLORS.text + '">' + esc(r.name) + '</text>';
 
-    boxes.forEach((box, i) => {
-        const r = Math.floor(i / cols);
-        const c = i % cols;
-        let x = PAD;
-        for (let cc = 0; cc < c; cc++) x += colWidths[cc] + GAP;
-        let y = PAD;
-        for (let rr = 0; rr < r; rr++) y += rowHeights[rr] + GAP;
-        box.x = x;
-        box.y = y;
+        if (r.cardFrom) {
+            svg += '<text x="' + (fEdgeX + 14) + '" y="' + (fEdgeY - 12) + '" font-size="13" font-weight="700" fill="' + COLORS.accent + '">' + esc(r.cardFrom) + '</text>';
+        }
+        if (r.cardTo) {
+            svg += '<text x="' + (tEdgeX - 14) + '" y="' + (tEdgeY - 12) + '" text-anchor="end" font-size="13" font-weight="700" fill="' + COLORS.accent + '">' + esc(r.cardTo) + '</text>';
+        }
     });
-
-    let svg = '';
-
-    // Relations
-    const entityMap = {};
-    boxes.forEach(b => { entityMap[b.name] = b; });
-    for (const rel of relations) {
-        const from = entityMap[rel.from];
-        const to = entityMap[rel.to];
-        if (!from || !to) continue;
-        const fx = from.x + from.w / 2;
-        const fy = from.y + from.h / 2;
-        const tx = to.x + to.w / 2;
-        const ty = to.y + to.h / 2;
-        svg += `<line x1="${fx}" y1="${fy}" x2="${tx}" y2="${ty}" stroke="${COLORS.border}" stroke-width="2" />`;
-        if (rel.label) {
-            const mx = (fx + tx) / 2;
-            const my = (fy + ty) / 2;
-            const rhombW = Math.max(80, measureText(rel.label, 12) + 24);
-            svg += `<polygon points="${mx},${my - 20} ${mx + rhombW / 2},${my} ${mx},${my + 20} ${mx - rhombW / 2},${my}" fill="${COLORS.accentLight}" stroke="${COLORS.accent}" stroke-width="1.5" />`;
-            svg += `<text x="${mx}" y="${my + 4}" text-anchor="middle" font-size="11" font-weight="500" fill="${COLORS.text}">${escapeHtml(rel.label)}</text>`;
-        }
-    }
-
-    // Entity boxes
-    for (const box of boxes) {
-        const { x, y, w, h, name, attributes } = box;
-        svg += `<rect x="${x + 2}" y="${y + 2}" width="${w}" height="${h}" rx="6" fill="rgba(0,0,0,0.05)" />`;
-        svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${COLORS.bg}" stroke="${COLORS.accent}" stroke-width="2" />`;
-        svg += `<rect x="${x}" y="${y}" width="${w}" height="${HEADER_H}" rx="6" fill="${COLORS.accent}" />`;
-        svg += `<rect x="${x}" y="${y + HEADER_H - 6}" width="${w}" height="6" fill="${COLORS.accent}" />`;
-        svg += `<text x="${x + w / 2}" y="${y + 24}" text-anchor="middle" font-size="14" font-weight="700" fill="white">${escapeHtml(name)}</text>`;
-
-        let ay = y + HEADER_H + 8;
-        for (const attr of attributes) {
-            const prefix = attr.isPK ? '🔑 ' : attr.isFK ? '🔗 ' : '   ';
-            const label = `${prefix}${attr.name}${attr.type ? ' : ' + attr.type : ''}`;
-            svg += `<text x="${x + 14}" y="${ay + 16}" font-size="12" fill="${attr.isPK ? COLORS.primary : COLORS.text}" ${attr.isPK ? 'font-weight="600"' : ''}>${escapeHtml(label)}</text>`;
-            if (attr.isPK) {
-                const tw = measureText(attr.name, 12);
-                svg += `<line x1="${x + 32}" y1="${ay + 18}" x2="${x + 32 + tw}" y2="${ay + 18}" stroke="${COLORS.primary}" stroke-width="1" />`;
-            }
-            ay += ROW_H;
-        }
-    }
 
     return wrapSvg(svg, totalW, totalH);
 }
 
 // ============================================================================
-// DFD RENDERER (Data Flow Diagram)
+// DFD — Circle Processes
 // ============================================================================
 
 function parseDFD(code) {
-    const processes = [];
-    const datastores = [];
-    const externals = [];
-    const flows = [];
+    const processes = [], datastores = [], externals = [], flows = [], errors = [];
     const lines = code.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-
     for (const line of lines) {
-        const procMatch = line.match(/^process\s+(.+)$/i);
-        if (procMatch) { processes.push(procMatch[1].replace(/"/g, '').trim()); continue; }
-
-        const dsMatch = line.match(/^datastore\s+(.+)$/i);
-        if (dsMatch) { datastores.push(dsMatch[1].replace(/"/g, '').trim()); continue; }
-
-        const extMatch = line.match(/^external\s+(.+)$/i);
-        if (extMatch) { externals.push(extMatch[1].replace(/"/g, '').trim()); continue; }
-
-        const flowMatch = line.match(/^(.+?)\s*(->|-->)\s*(.+?)(?:\s*:\s*(.+))?$/);
-        if (flowMatch) {
-            const from = flowMatch[1].replace(/"/g, '').trim();
-            const to = flowMatch[3].replace(/"/g, '').trim();
-            flows.push({ from, to, label: flowMatch[4]?.trim() || '' });
-            // Auto-detect types
-            if (!processes.includes(from) && !datastores.includes(from) && !externals.includes(from)) {
-                processes.push(from);
-            }
-            if (!processes.includes(to) && !datastores.includes(to) && !externals.includes(to)) {
-                processes.push(to);
-            }
+        const pm = line.match(/^process\s+(.+)$/i);
+        if (pm) { processes.push(pm[1].replace(/"/g, '').trim()); continue; }
+        const dm = line.match(/^(?:datastore|store)\s+(.+)$/i);
+        if (dm) { datastores.push(dm[1].replace(/"/g, '').trim()); continue; }
+        const em = line.match(/^external\s+(.+)$/i);
+        if (em) { externals.push(em[1].replace(/"/g, '').trim()); continue; }
+        const fm = line.match(/^(.+?)\s*(->|-->)\s*(.+?)(?:\s*:\s*(.+))?$/);
+        if (fm) {
+            const f = fm[1].replace(/"/g, '').trim(), t = fm[3].replace(/"/g, '').trim();
+            const fIsExt = externals.includes(f), tIsExt = externals.includes(t);
+            const fIsDs = datastores.includes(f), tIsDs = datastores.includes(t);
+            if (fIsExt && tIsExt) { errors.push('Invalid: external to external (' + f + ' to ' + t + ')'); continue; }
+            if (fIsDs && tIsDs) { errors.push('Invalid: store to store (' + f + ' to ' + t + ')'); continue; }
+            if (fIsExt && tIsDs) { errors.push('Invalid: external to store (' + f + ' to ' + t + ')'); continue; }
+            flows.push({ from: f, to: t, label: fm[4]?.trim() || '' });
+            if (!processes.includes(f) && !datastores.includes(f) && !externals.includes(f)) processes.push(f);
+            if (!processes.includes(t) && !datastores.includes(t) && !externals.includes(t)) processes.push(t);
         }
     }
-
-    return { processes: [...new Set(processes)], datastores: [...new Set(datastores)], externals: [...new Set(externals)], flows };
+    return { processes: [...new Set(processes)], datastores: [...new Set(datastores)], externals: [...new Set(externals)], flows, errors };
 }
 
 function renderDFD(code) {
-    const { processes, datastores, externals, flows } = parseDFD(code);
-    if (processes.length === 0 && datastores.length === 0) return null;
+    const { processes, datastores, externals, flows, errors } = parseDFD(code);
+    if (!processes.length && !datastores.length && !externals.length) {
+        if (errors.length) {
+            let svg = '';
+            errors.forEach((e, i) => {
+                svg += '<text x="20" y="' + (30 + i * 24) + '" font-size="14" fill="#c00">' + esc(e) + '</text>';
+            });
+            return wrapSvg(svg, 600, 30 + errors.length * 24 + 20);
+        }
+        return null;
+    }
 
-    const PAD = 50;
-    const GAP = 120;
-    const allItems = [
-        ...externals.map(name => ({ name, type: 'external' })),
-        ...processes.map(name => ({ name, type: 'process' })),
-        ...datastores.map(name => ({ name, type: 'datastore' })),
-    ];
+    const EW = 140, EH = 50, DSW = 160, DSH = 40;
+    const procR = 60;
 
-    // Grid layout
-    const cols = Math.min(allItems.length, 3);
-    const rows = Math.ceil(allItems.length / cols);
-    const cellW = 180;
-    const cellH = 80;
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({ rankdir: 'LR', ranksep: 140, nodesep: 80, marginx: 60, marginy: 60 });
+    g.setDefaultEdgeLabel(() => ({}));
 
-    const totalW = PAD * 2 + cols * (cellW + GAP) - GAP;
-    const totalH = PAD * 2 + rows * (cellH + GAP) - GAP;
+    const nodeType = {};
+    externals.forEach(e => { nodeType[e] = 'ext'; });
+    processes.forEach(p => { nodeType[p] = 'proc'; });
+    datastores.forEach(d => { nodeType[d] = 'ds'; });
 
-    const positions = {};
-    allItems.forEach((item, i) => {
-        const r = Math.floor(i / cols);
-        const c = i % cols;
-        positions[item.name] = {
-            x: PAD + c * (cellW + GAP) + cellW / 2,
-            y: PAD + r * (cellH + GAP) + cellH / 2,
-            type: item.type
-        };
-    });
+    for (const e of externals) {
+        const w = Math.max(EW, mt(e, 15) + 36);
+        g.setNode(e, { label: e, width: w, height: EH });
+    }
+    for (const p of processes) {
+        const r = Math.max(procR, mt(p, 14) / 2 + 20);
+        g.setNode(p, { label: p, width: r * 2, height: r * 2 });
+    }
+    for (const d of datastores) {
+        const w = Math.max(DSW, mt(d, 14) + 30);
+        g.setNode(d, { label: d, width: w, height: DSH });
+    }
+
+    for (const f of flows) {
+        g.setEdge(f.from, f.to, { label: f.label || '' });
+    }
+
+    dagre.layout(g);
+
+    const graphInfo = g.graph();
+    const totalW = Math.max(graphInfo.width + 120, 500);
+    const totalH = Math.max(graphInfo.height + 120, 300);
 
     let svg = '';
 
-    // Draw flows
-    for (const flow of flows) {
-        const from = positions[flow.from];
-        const to = positions[flow.to];
-        if (!from || !to) continue;
-        svg += `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${COLORS.line}" stroke-width="1.5" marker-end="url(#arrowhead)" />`;
-        if (flow.label) {
-            const mx = (from.x + to.x) / 2;
-            const my = (from.y + to.y) / 2;
-            const tw = measureText(flow.label, 11) + 12;
-            svg += `<rect x="${mx - tw / 2}" y="${my - 18}" width="${tw}" height="20" rx="4" fill="${COLORS.bg}" stroke="${COLORS.border}" stroke-width="1" />`;
-            svg += `<text x="${mx}" y="${my - 4}" text-anchor="middle" font-size="11" fill="${COLORS.text}">${escapeHtml(flow.label)}</text>`;
+    if (errors.length) {
+        errors.forEach((e, i) => {
+            svg += '<text x="20" y="' + (20 + i * 18) + '" font-size="12" fill="#c00">' + esc(e) + '</text>';
+        });
+    }
+
+    const allNodes = [...externals, ...processes, ...datastores];
+
+    for (const name of allNodes) {
+        const nd = g.node(name);
+        if (!nd) continue;
+        const { x, y } = nd;
+        const type = nodeType[name];
+
+        if (type === 'proc') {
+            const r = nd.width / 2;
+            svg += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + COLORS.pinkLight + '" stroke="' + COLORS.border + '" stroke-width="1.5"/>';
+            const words = name.split(' ');
+            if (words.length > 1) {
+                const tlines = [];
+                let cur = '';
+                for (const w of words) {
+                    if (cur && mt(cur + ' ' + w, 14) > r * 1.4) { tlines.push(cur); cur = w; }
+                    else cur = cur ? cur + ' ' + w : w;
+                }
+                if (cur) tlines.push(cur);
+                const startY2 = y - (tlines.length - 1) * 10;
+                tlines.forEach((l, i) => {
+                    svg += '<text x="' + x + '" y="' + (startY2 + i * 20) + '" text-anchor="middle" font-size="14" font-weight="600" fill="' + COLORS.text + '">' + esc(l) + '</text>';
+                });
+            } else {
+                svg += '<text x="' + x + '" y="' + (y + 5) + '" text-anchor="middle" font-size="14" font-weight="600" fill="' + COLORS.text + '">' + esc(name) + '</text>';
+            }
+        } else if (type === 'ext') {
+            const w = nd.width, h = nd.height;
+            svg += '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h + '" fill="' + COLORS.primary + '" stroke="' + COLORS.primary + '" stroke-width="2" rx="4"/>';
+            svg += '<text x="' + x + '" y="' + (y + 5) + '" text-anchor="middle" font-size="14" font-weight="700" fill="white">' + esc(name) + '</text>';
+        } else if (type === 'ds') {
+            const w = nd.width, h = nd.height;
+            svg += '<rect x="' + (x - w / 2) + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h + '" fill="' + COLORS.primaryLight + '" stroke="none"/>';
+            svg += '<line x1="' + (x - w / 2) + '" y1="' + (y - h / 2) + '" x2="' + (x + w / 2) + '" y2="' + (y - h / 2) + '" stroke="' + COLORS.primary + '" stroke-width="2"/>';
+            svg += '<line x1="' + (x - w / 2) + '" y1="' + (y + h / 2) + '" x2="' + (x + w / 2) + '" y2="' + (y + h / 2) + '" stroke="' + COLORS.primary + '" stroke-width="2"/>';
+            svg += '<text x="' + x + '" y="' + (y + 5) + '" text-anchor="middle" font-size="13" font-weight="600" fill="' + COLORS.text + '">' + esc(name) + '</text>';
         }
     }
 
-    // Draw nodes
-    for (const item of allItems) {
-        const pos = positions[item.name];
-        const { x, y } = pos;
-        const w = Math.max(cellW, measureText(item.name, 13) + 40);
+    const pairCount = {};
+    flows.forEach(f => {
+        const key = [f.from, f.to].sort().join('||');
+        pairCount[key] = (pairCount[key] || 0) + 1;
+    });
+    const pairIdx = {};
 
-        if (item.type === 'process') {
-            svg += `<circle cx="${x}" cy="${y}" r="${cellH / 2}" fill="${COLORS.primaryLight}" stroke="${COLORS.primary}" stroke-width="2" />`;
-            svg += `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="13" font-weight="600" fill="${COLORS.text}">${escapeHtml(item.name)}</text>`;
-        } else if (item.type === 'datastore') {
-            svg += `<rect x="${x - w / 2}" y="${y - 20}" width="${w}" height="40" fill="${COLORS.greenLight}" stroke="${COLORS.green}" stroke-width="2" />`;
-            svg += `<line x1="${x - w / 2}" y1="${y - 20}" x2="${x + w / 2}" y2="${y - 20}" stroke="${COLORS.green}" stroke-width="2" />`;
-            svg += `<line x1="${x - w / 2}" y1="${y + 20}" x2="${x + w / 2}" y2="${y + 20}" stroke="${COLORS.green}" stroke-width="2" />`;
-            svg += `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="13" font-weight="500" fill="${COLORS.text}">${escapeHtml(item.name)}</text>`;
-        } else if (item.type === 'external') {
-            svg += `<rect x="${x - w / 2}" y="${y - 25}" width="${w}" height="50" rx="4" fill="${COLORS.bg}" stroke="${COLORS.text}" stroke-width="2" />`;
-            svg += `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="13" font-weight="600" fill="${COLORS.text}">${escapeHtml(item.name)}</text>`;
+    for (const f of flows) {
+        const edgeData = g.edge(f.from, f.to);
+        if (!edgeData || !edgeData.points) continue;
+
+        const key = [f.from, f.to].sort().join('||');
+        const cnt = pairCount[key];
+        const idx = pairIdx[key] = (pairIdx[key] || 0) + 1;
+        const off = cnt > 1 ? (idx === 1 ? -20 : 20) : 0;
+
+        const pts = edgeData.points.map(p => ({ x: p.x, y: p.y + off }));
+
+        // Clip start point to source shape boundary
+        const fromNode = g.node(f.from);
+        const fromType = nodeType[f.from];
+        if (fromNode && pts.length >= 2) {
+            const nextPt = pts[1];
+            if (fromType === 'proc') {
+                const r = fromNode.width / 2;
+                const ang = Math.atan2(nextPt.y - fromNode.y, nextPt.x - fromNode.x);
+                pts[0] = { x: fromNode.x + r * Math.cos(ang), y: fromNode.y + r * Math.sin(ang) };
+            } else {
+                const w = fromNode.width, h = fromNode.height;
+                pts[0] = boxEdge({ x: fromNode.x - w / 2, y: fromNode.y - h / 2, w, h }, nextPt.x, nextPt.y);
+            }
+        }
+
+        // Clip end point to target shape boundary
+        const toNode = g.node(f.to);
+        const toType = nodeType[f.to];
+        if (toNode && pts.length >= 2) {
+            const prevPt = pts[pts.length - 2];
+            if (toType === 'proc') {
+                const r = toNode.width / 2;
+                const ang = Math.atan2(prevPt.y - toNode.y, prevPt.x - toNode.x);
+                pts[pts.length - 1] = { x: toNode.x + r * Math.cos(ang), y: toNode.y + r * Math.sin(ang) };
+            } else {
+                const w = toNode.width, h = toNode.height;
+                pts[pts.length - 1] = boxEdge({ x: toNode.x - w / 2, y: toNode.y - h / 2, w, h }, prevPt.x, prevPt.y);
+            }
+        }
+
+        if (pts.length >= 3) {
+            let d = 'M ' + pts[0].x + ' ' + pts[0].y;
+            for (let i = 1; i < pts.length - 1; i += 2) {
+                const cp = pts[i];
+                const next = pts[i + 1] || pts[pts.length - 1];
+                d += ' Q ' + cp.x + ' ' + cp.y + ' ' + next.x + ' ' + next.y;
+            }
+            if (pts.length % 2 === 0) {
+                d += ' L ' + pts[pts.length - 1].x + ' ' + pts[pts.length - 1].y;
+            }
+            svg += '<path d="' + d + '" fill="none" stroke="' + COLORS.line + '" stroke-width="1.5" marker-end="url(#ah)"/>';
+        } else {
+            svg += '<line x1="' + pts[0].x + '" y1="' + pts[0].y + '" x2="' + pts[pts.length - 1].x + '" y2="' + pts[pts.length - 1].y + '" stroke="' + COLORS.line + '" stroke-width="1.5" marker-end="url(#ah)"/>';
+        }
+
+        if (f.label) {
+            const mid = pts[Math.floor(pts.length / 2)];
+            const labelOff = off <= 0 ? -14 : 20;
+            const lw = mt(f.label, 11) + 12;
+            const lh = 18;
+            svg += '<rect x="' + (mid.x - lw / 2) + '" y="' + (mid.y + labelOff - lh + 4) + '" width="' + lw + '" height="' + lh + '" fill="white" rx="3"/>';
+            svg += '<text x="' + mid.x + '" y="' + (mid.y + labelOff) + '" text-anchor="middle" font-size="11" fill="' + COLORS.textLight + '">' + esc(f.label) + '</text>';
         }
     }
 
     return wrapSvg(svg, totalW, totalH);
 }
+
 
 // ============================================================================
 // MAIN RENDER FUNCTION
@@ -947,25 +1029,13 @@ const CUSTOM_RENDERERS = {
     dfd: renderDFD,
 };
 
-/**
- * Render a diagram using the custom engine.
- * Returns SVG string or null if parsing fails.
- */
 export function renderCustomDiagram(code, diagramType) {
     const renderer = CUSTOM_RENDERERS[diagramType];
     if (!renderer) return null;
-
-    try {
-        return renderer(code);
-    } catch (err) {
-        console.error(`Custom render error (${diagramType}):`, err);
-        return null;
-    }
+    try { return renderer(code); }
+    catch (err) { console.error(`Custom render error (${diagramType}):`, err); return null; }
 }
 
-/**
- * Check if a diagram type has a custom renderer.
- */
 export function hasCustomRenderer(diagramType) {
     return diagramType in CUSTOM_RENDERERS;
 }
@@ -977,36 +1047,42 @@ export function hasCustomRenderer(diagramType) {
 export const DIAGRAM_TYPES = {
     class: {
         label: 'Class Diagram',
-        defaultCode: `class User {
+        defaultCode: `class Person {
   +name: String
-  +email: String
+  +phoneNumber: String
+  +emailAddress: String
   ---
-  +login()
-  +logout()
-  +getProfile()
+  +purchaseParkingPass()
 }
 
-class Diagram {
-  +title: String
-  +code: String
-  +type: String
+class Address {
+  +street: String
+  +city: String
+  +state: String
   ---
-  +render()
-  +save()
-  +export()
+  +validate(): bool
+  +outputAsLabel(): String
 }
 
-class Project {
-  +name: String
-  +description: String
+class Student {
+  +studentNumber: int
+  +averageMark: int
   ---
-  +addDiagram()
-  +removeDiagram()
+  +isEligibleToEnroll(str): bool
+  +getSeminarsTaken(): int
 }
 
-User -> Diagram : creates
-User -> Project : owns
-Project -> Diagram : contains`
+class Professor {
+  +salary: int
+  +staffNumber: int
+  ---
+  +numberOfClasses: int
+}
+
+Person "0..1" -> "1" Address : lives at
+Person <|-- Student
+Person <|-- Professor
+Professor "1..5" -> "0..*" Student : supervises`
     },
 
     sequence: {
@@ -1043,77 +1119,105 @@ Export -> (end)`
 
     usecase: {
         label: 'Use Case Diagram',
-        defaultCode: `actor User
+        defaultCode: `system "Online Shopping System"
+actor Customer
 actor Admin
 
-User -> Login
-User -> Create Diagram
-User -> Edit Diagram
-User -> Export Diagram
-User -> Share Diagram
-Admin -> Manage Users
-Admin -> View Analytics`
+Customer -> View Items
+Customer -> Make Purchase
+Make Purchase ..> Checkout : <<include>>
+Customer -> Track Order
+Admin -> Manage Products
+Admin -> View Reports`
     },
 
     er: {
         label: 'ER Diagram',
         defaultCode: `entity User {
-  * id : INT
-  name : VARCHAR
-  email : VARCHAR
-  + role_id : INT
+  *UserID
+  Name
+  Email
+  +CoachID
 }
 
-entity Diagram {
-  * id : INT
-  title : VARCHAR
-  code : TEXT
-  type : VARCHAR
-  + user_id : INT
+entity Habit {
+  *HabitID
+  HabitName
 }
 
-entity Role {
-  * id : INT
-  name : VARCHAR
-  permissions : JSON
+entity Coach {
+  *CoachID
+  Name
 }
 
-User ||--o{ Diagram : creates
-Role ||--o{ User : assigns`
+User -- Has -- Habit : 1,M
+User -- Has -- Coach : M,1`
     },
 
     dfd: {
         label: 'Data Flow Diagram',
-        defaultCode: `external User
-process Authentication
-process Diagram Engine
-process Export Service
-datastore User Database
-datastore Diagram Store
+        defaultCode: `external Customer
+external Bank
 
-User -> Authentication : Login Request
-Authentication -> User Database : Verify Credentials
-User Database -> Authentication : User Data
-Authentication -> User : Auth Token
-User -> Diagram Engine : Create Diagram
-Diagram Engine -> Diagram Store : Save Diagram
-Diagram Store -> Diagram Engine : Diagram Data
-Diagram Engine -> User : Rendered Output
-User -> Export Service : Export Request
-Export Service -> Diagram Store : Fetch Diagram
-Export Service -> User : PNG/SVG File`
-    },
+process "Online Bookstore System"
 
-    graphviz: {
-        label: 'Graphviz (DOT)',
-        defaultCode: `digraph G {
-  rankdir=LR;
-  node [shape=box, style="rounded,filled", fillcolor="#e8e8ff"];
-  
-  Start -> Process -> End;
-  Process -> Decision;
-  Decision -> "Option A";
-  Decision -> "Option B";
-}`
+Customer -> "Online Bookstore System" : Order Details
+"Online Bookstore System" -> Customer : Payment Info
+"Online Bookstore System" -> Bank : Order Confirmation
+Bank -> "Online Bookstore System" : Payment Confirmation`
     },
 };
+
+// ============================================================================
+// DIAGRAM GUIDES
+// ============================================================================
+
+export const DIAGRAM_GUIDES = {
+    class: {
+        title: 'Class Diagram Syntax Guide',
+        sections: [
+            { heading: 'Defining a Class', content: 'class ClassName {\n  +publicField: String\n  -privateField: int\n  #protectedField: bool\n  ---\n  +publicMethod(): void\n  -privateMethod()\n}', note: 'Use +, -, # for visibility. --- separates attributes from methods.' },
+            { heading: 'Custom Color', content: 'class MyClass #ff6600 {\n  +name: String\n}', note: 'Add a hex color after the class name to set a custom header color.' },
+            { heading: 'Relationships', content: 'ClassA -> ClassB : uses\nClassA <|-- ClassB : inherits\nClassA <>-- ClassB : composition\nClassA -- ClassB : association', note: '-> dependency, <|-- inheritance, <>-- composition, -- association' },
+            { heading: 'Cardinality', content: 'ClassA "1" -> "0..*" ClassB : has', note: 'Add cardinality in quotes before/after the arrow.' },
+        ]
+    },
+    sequence: {
+        title: 'Sequence Diagram Syntax Guide',
+        sections: [
+            { heading: 'Participants', content: 'participant User\nparticipant Server', note: 'Declare participants at the top.' },
+            { heading: 'Messages', content: 'User -> Server : Request\nServer --> User : Response\nUser -> User : Self call', note: '-> solid arrow, --> dashed return. Self-messages supported.' },
+            { heading: 'Notes', content: 'note over Server : Processing', note: 'Add notes over a participant.' },
+        ]
+    },
+    activity: {
+        title: 'Activity Diagram Syntax Guide',
+        sections: [
+            { heading: 'Nodes', content: '(start)\n(end)\n<Decision?>\nAction Name', note: '(start)/(end) = circles. <text> = decision diamond. Plain text = action.' },
+            { heading: 'Flows', content: '(start) -> Action\nAction -> <Done?>\n<Done?> -> Result : Yes\n<Done?> -> Action : No\nResult -> (end)', note: 'Use -> to connect. Add labels with : after target.' },
+        ]
+    },
+    usecase: {
+        title: 'Use Case Diagram Syntax Guide',
+        sections: [
+            { heading: 'System Name', content: 'system "My Application"', note: 'Sets the system boundary title.' },
+            { heading: 'Actors & Use Cases', content: 'actor User\nactor Admin\nusecase Login', note: 'Declare actors and use cases. Undeclared targets auto-detect as use cases.' },
+            { heading: 'Relationships', content: 'User -> Login\nLogin ..> Authenticate : <<include>>\nCheckout ..> Apply Coupon : <<extend>>', note: '-> solid line, ..> dashed with stereotype label.' },
+        ]
+    },
+    er: {
+        title: 'ER Diagram Syntax Guide (Chen Notation)',
+        sections: [
+            { heading: 'Entities', content: 'entity User {\n  *UserID\n  Name\n  Email\n  +RoleID\n}', note: '* = Primary Key (underlined oval), + = Foreign Key (dashed oval).' },
+            { heading: 'Relationships', content: 'User -- Has -- Habit : 1,M\nUser -- Belongs -- Dept : M,1', note: 'Entity1 -- RelName -- Entity2 : leftCard,rightCard. Diamond is drawn between entities.' },
+        ]
+    },
+    dfd: {
+        title: 'Data Flow Diagram Syntax Guide',
+        sections: [
+            { heading: 'Node Types', content: 'process ProcessName\ndatastore StoreName\nexternal ExternalEntity', note: 'process = circle, datastore = open rectangle, external = solid rectangle.' },
+            { heading: 'Data Flows', content: 'External -> Process : Data Label\nProcess -> Datastore : Store Data', note: 'Use -> for data flow arrows. Labels after : describe the data.' },
+        ]
+    },
+};
+

@@ -52,7 +52,6 @@ export function getKrokiUrl(source, diagramType, outputFormat = 'svg') {
  * Map of diagram types to their Kroki identifiers and display names.
  */
 export const DIAGRAM_TYPES = {
-    graphviz: { label: 'Graphviz (DOT)', defaultCode: 'digraph G {\n  rankdir=LR;\n  node [shape=box, style="rounded,filled", fillcolor="#e8e8ff"];\n  \n  Start -> Process -> End;\n  Process -> Decision;\n  Decision -> "Option A";\n  Decision -> "Option B";\n}' },
     plantuml: { label: 'PlantUML', defaultCode: '@startuml\n\nclass User {\n  +name: String\n  +email: String\n  +login()\n  +logout()\n}\n\nclass Diagram {\n  +title: String\n  +code: String\n  +render()\n  +save()\n}\n\nUser "1" --> "*" Diagram : creates\n\n@enduml' },
     mermaid: { label: 'Mermaid', defaultCode: 'graph TD\n  A[Start] --> B{Decision}\n  B -->|Yes| C[Process A]\n  B -->|No| D[Process B]\n  C --> E[End]\n  D --> E' },
     actdiag: { label: 'Activity Diagram', defaultCode: 'actdiag {\n  login -> check_credentials -> authorize\n  authorize -> show_dashboard\n  authorize -> show_error\n}' },

@@ -46,11 +46,6 @@ export default function SharedView() {
                     } else {
                         setRenderError('Could not render this diagram. Check the diagram syntax.');
                     }
-                } else if (type === 'graphviz') {
-                    const mod = await import('@viz-js/viz');
-                    const viz = await mod.instance();
-                    const svg = viz.renderSVGElement(code);
-                    setRenderedOutput(svg.outerHTML);
                 } else {
                     const result = await renderWithKroki(code, type, 'svg');
                     setRenderedOutput(result);
