@@ -212,7 +212,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    cursor: pointer;
+    cursor: default;
     display: block;
 }
 
@@ -233,27 +233,16 @@
     overflow: hidden;
 }
 
-.example-card__icon {
-    font-size: 3rem;
+.example-card__img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 12px;
     transition: transform 0.35s ease;
-    position: relative;
-    z-index: 1;
 }
 
-.example-card:hover .example-card__icon {
-    transform: scale(1.2) rotate(5deg);
-}
-
-.example-card__bg-pattern {
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(circle at 70% 30%, color-mix(in srgb, var(--card-accent) 10%, transparent), transparent 60%);
-    transition: opacity 0.35s ease;
-    opacity: 0.5;
-}
-
-.example-card:hover .example-card__bg-pattern {
-    opacity: 1;
+.example-card:hover .example-card__img {
+    transform: scale(1.05);
 }
 
 .example-card__info {

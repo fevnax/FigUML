@@ -67,7 +67,7 @@ export default function SharedView() {
 
         fetchAndRender();
 
-        // Safety timeout — if Firestore hangs, show an error after 15 seconds
+        // Safety timeout - if Firestore hangs, show an error after 15 seconds
         const timeout = setTimeout(() => {
             if (!cancelled) {
                 setLoading(false);

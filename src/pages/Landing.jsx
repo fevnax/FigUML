@@ -13,12 +13,12 @@ const FEATURES = [
 ];
 
 const EXAMPLES = [
-    { type: 'Class Diagram', syntax: 'Custom Engine', color: '#6366f1', icon: '📐' },
-    { type: 'Sequence Diagram', syntax: 'Custom Engine', color: '#06b6d4', icon: '🔄' },
-    { type: 'Activity Diagram', syntax: 'Custom Engine', color: '#8b5cf6', icon: '📊' },
-    { type: 'ER Diagram', syntax: 'Custom Engine', color: '#ec4899', icon: '🗃️' },
-    { type: 'Use Case Diagram', syntax: 'Custom Engine', color: '#f59e0b', icon: '👤' },
-    { type: 'Data Flow Diagram', syntax: 'Custom Engine', color: '#10b981', icon: '🔀' },
+    { type: 'Class Diagram', syntax: 'Custom Engine', color: '#6366f1', img: '/examples/class-preview.png' },
+    { type: 'Sequence Diagram', syntax: 'Custom Engine', color: '#06b6d4', img: '/examples/sequence-preview.png' },
+    { type: 'Activity Diagram', syntax: 'Custom Engine', color: '#8b5cf6', img: '/examples/activity-preview.png' },
+    { type: 'ER Diagram', syntax: 'Custom Engine', color: '#ec4899', img: '/examples/er-preview.png' },
+    { type: 'Use Case Diagram', syntax: 'Custom Engine', color: '#f59e0b', img: '/examples/usecase-preview.png' },
+    { type: 'Data Flow Diagram', syntax: 'Custom Engine', color: '#10b981', img: '/examples/dfd-preview.png' },
 ];
 
 const STEPS = [
@@ -48,7 +48,7 @@ export default function Landing() {
                     </h1>
                     <p className="hero__subtitle animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
                         Transform your textual descriptions into stunning UML, ER, and Data Flow diagrams.
-                        — no drag-and-drop needed.
+                        - no drag-and-drop needed.
                     </p>
                     <div className="hero__actions animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
                         <Link to={user ? '/my-diagrams' : '/auth'} className="btn btn-primary btn-lg">
@@ -92,16 +92,15 @@ export default function Landing() {
                     </div>
                     <div className="examples__grid">
                         {EXAMPLES.map((ex, i) => (
-                            <Link key={i} to={user ? '/editor' : '/auth'} className="example-card" style={{ '--card-accent': ex.color }}>
+                            <div key={i} className="example-card" style={{ '--card-accent': ex.color }}>
                                 <div className="example-card__preview">
-                                    <span className="example-card__icon">{ex.icon}</span>
-                                    <div className="example-card__bg-pattern" />
+                                    <img src={ex.img} alt={ex.type} className="example-card__img" />
                                 </div>
                                 <div className="example-card__info">
                                     <span className="example-card__type">{ex.type}</span>
                                     <span className="example-card__syntax">{ex.syntax}</span>
                                 </div>
-                            </Link>
+                            </div>
                         ))}
                     </div>
                 </div>

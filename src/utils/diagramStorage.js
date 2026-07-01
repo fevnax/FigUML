@@ -17,7 +17,7 @@ export async function saveDiagram(diagramId, userId, data) {
 }
 
 /**
- * Load a single diagram by ID (no auth required — for shared views).
+ * Load a single diagram by ID (no auth required - for shared views).
  */
 export async function loadDiagram(diagramId) {
     const docRef = doc(db, DIAGRAMS_COLLECTION, diagramId);
@@ -30,7 +30,7 @@ export async function loadDiagram(diagramId) {
 
 /**
  * List all diagrams for a user.
- * Removed orderBy to avoid requiring a composite Firestore index —
+ * Removed orderBy to avoid requiring a composite Firestore index -
  * sorting is done client-side instead for faster initial load.
  */
 export async function listUserDiagrams(userId) {

@@ -12,13 +12,7 @@ export default function Footer() {
                     {/* Creator 1 */}
                     <div className="creator-card">
                         <div className="creator-card__photo">
-                            {/* Replace the src below with actual profile picture path */}
-                            <div className="creator-card__photo-placeholder">
-                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                                    <circle cx="12" cy="7" r="4" />
-                                </svg>
-                            </div>
+                            <img src="/harsh.jpg" alt="Harshvardhan P." className="creator-card__photo-img" />
                         </div>
                         <div className="creator-card__body">
                             <div className="creator-card__overlay" />
@@ -43,12 +37,7 @@ export default function Footer() {
                     {/* Creator 2 */}
                     <div className="creator-card">
                         <div className="creator-card__photo">
-                            <div className="creator-card__photo-placeholder">
-                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                                    <circle cx="12" cy="7" r="4" />
-                                </svg>
-                            </div>
+                            <img src="/ganesh.png" alt="Ganesh M." className="creator-card__photo-img" />
                         </div>
                         <div className="creator-card__body">
                             <div className="creator-card__overlay" />

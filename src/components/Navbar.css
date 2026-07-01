@@ -145,13 +145,16 @@
 
 .navbar__mega-card--profile {
     flex: 1;
-    background: #1a1a2e;
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
     padding: 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    color: white;
+    color: var(--text-primary);
     min-width: 180px;
 }
 
@@ -188,7 +191,7 @@
 
 .navbar__mega-email {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--text-secondary);
 }
 
 .navbar__mega-logout {
@@ -224,8 +227,11 @@
     justify-content: center;
     padding: 16px 24px;
     border-radius: 14px;
-    background: #1a1a2e;
-    color: white;
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    color: var(--text-primary);
     font-weight: 600;
     font-size: 0.95rem;
     transition: all 0.2s ease;
@@ -234,9 +240,9 @@
 }
 
 .navbar__mega-btn:hover {
-    background: #252547;
+    background: rgba(255, 255, 255, 0.85);
     transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.15);
 }
 
 /* ============ Desktop Actions (Non-scrolled) ============ */

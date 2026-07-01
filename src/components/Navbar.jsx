@@ -45,7 +45,7 @@ export default function Navbar() {
 
     const userInitial = user?.displayName?.[0] || user?.email?.[0] || 'U';
 
-    const showScrolledNav = isLanding && scrolled;
+    const showScrolledNav = scrolled;
 
     return (
         <nav className={`navbar ${isLanding ? 'navbar--transparent' : ''} ${showScrolledNav ? 'navbar--scrolled' : ''}`}>

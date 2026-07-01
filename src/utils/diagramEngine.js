@@ -1,5 +1,5 @@
 /**
- * FigUML Custom Diagram Engine — Full Rewrite
+ * FigUML Custom Diagram Engine - Full Rewrite
  * Pure SVG renderers for: Class, Sequence, Activity, Use Case, ER (Chen), DFD
  */
 import dagre from '@dagrejs/dagre';
@@ -142,7 +142,7 @@ function renderClassDiagram(code) {
         var fp, tp, labelX, labelY, pathSvg;
 
         // Helper: check if segment crosses any box
-        var segCrossesBox = function(x1, y1, x2, y2) {
+        var segCrossesBox = function (x1, y1, x2, y2) {
             for (var ci = 0; ci < boxes.length; ci++) {
                 var cb = boxes[ci];
                 if (cb.name === rel.from || cb.name === rel.to) continue;
@@ -622,7 +622,7 @@ function renderUseCaseDiagram(code) {
 }
 
 // ============================================================================
-// ER DIAGRAM — Chen Notation
+// ER DIAGRAM - Chen Notation
 // ============================================================================
 
 function parseERDiagram(code) {
@@ -814,7 +814,7 @@ function renderERDiagram(code) {
 }
 
 // ============================================================================
-// DFD — Circle Processes
+// DFD - Circle Processes
 // ============================================================================
 
 function parseDFD(code) {
@@ -827,7 +827,7 @@ function parseDFD(code) {
         if (dm) { datastores.push(dm[1].replace(/"/g, '').trim()); continue; }
         const em = line.match(/^external\s+(.+)$/i);
         if (em) { externals.push(em[1].replace(/"/g, '').trim()); continue; }
-        const fm = line.match(/^(.+?)\s*(->|-->)\s*(.+?)(?:\s*:\s*(.+))?$/);
+        const fm = line.match(/^(.+?)\s+(->|-->)\s+(.+?)(?:\s*:\s*(.+))?$/);
         if (fm) {
             const f = fm[1].replace(/"/g, '').trim(), t = fm[3].replace(/"/g, '').trim();
             const fIsExt = externals.includes(f), tIsExt = externals.includes(t);
@@ -1176,47 +1176,61 @@ export const DIAGRAM_GUIDES = {
     class: {
         title: 'Class Diagram Syntax Guide',
         sections: [
-            { heading: 'Defining a Class', content: 'class ClassName {\n  +publicField: String\n  -privateField: int\n  #protectedField: bool\n  ---\n  +publicMethod(): void\n  -privateMethod()\n}', note: 'Use +, -, # for visibility. --- separates attributes from methods.' },
-            { heading: 'Custom Color', content: 'class MyClass #ff6600 {\n  +name: String\n}', note: 'Add a hex color after the class name to set a custom header color.' },
-            { heading: 'Relationships', content: 'ClassA -> ClassB : uses\nClassA <|-- ClassB : inherits\nClassA <>-- ClassB : composition\nClassA -- ClassB : association', note: '-> dependency, <|-- inheritance, <>-- composition, -- association' },
-            { heading: 'Cardinality', content: 'ClassA "1" -> "0..*" ClassB : has', note: 'Add cardinality in quotes before/after the arrow.' },
+            { heading: 'Defining a Class', content: 'class ClassName {\n  +publicField: String\n  -privateField: int\n  #protectedField: bool\n  ~packageField: double\n  ---\n  +publicMethod(): void\n  -privateMethod()\n  #protectedMethod(): String\n}', note: 'Use +, -, #, ~ for public, private, protected, package visibility. Use --- to separate attributes from methods. Lines with () are auto-detected as methods.' },
+            { heading: 'Custom Header Color', content: 'class MyClass #ff6600 {\n  +name: String\n}', note: 'Add a hex color code (e.g. #ff6600, #e11) after the class name to customize the header background color.' },
+            { heading: 'All Relationship Types', content: 'ClassA -> ClassB : dependency\nClassA -- ClassB : association\nClassA <|-- ClassB : inheritance\nClassA <|.. ClassB : realization\nClassA <>-- ClassB : composition\nClassA <>-> ClassB : aggregation\nClassA .. ClassB : note link\nClassA .> ClassB : dashed dependency', note: '-> dependency, -- association, <|-- inheritance (solid), <|.. realization (dashed), <>-- composition (filled diamond), <>-> aggregation (open diamond), .. dotted link, .> dashed arrow.' },
+            { heading: 'Cardinality / Multiplicity', content: 'ClassA "1" -> "0..*" ClassB : has\nTeacher "1..5" -- "0..*" Student : teaches', note: 'Add multiplicity in quotes before and/or after the arrow. Common values: 1, 0..1, 0..*, 1..*, 1..5' },
+            { heading: 'Self-Referencing', content: 'Employee "1" -> "0..*" Employee : manages', note: 'A class can reference itself. The connector draws a loop back to the same box.' },
+            { heading: 'Full Example', content: 'class Person {\n  +name: String\n  +age: int\n  ---\n  +getName(): String\n}\n\nclass Student {\n  +studentId: int\n  ---\n  +enroll(): void\n}\n\nPerson <|-- Student : inherits\nStudent "0..*" -> "1" Person : belongs to', note: 'Classes are laid out in a 3-column grid. Connectors use orthogonal (right-angle) routing.' },
         ]
     },
     sequence: {
         title: 'Sequence Diagram Syntax Guide',
         sections: [
-            { heading: 'Participants', content: 'participant User\nparticipant Server', note: 'Declare participants at the top.' },
-            { heading: 'Messages', content: 'User -> Server : Request\nServer --> User : Response\nUser -> User : Self call', note: '-> solid arrow, --> dashed return. Self-messages supported.' },
-            { heading: 'Notes', content: 'note over Server : Processing', note: 'Add notes over a participant.' },
+            { heading: 'Declaring Participants', content: 'participant User\nparticipant Server\nparticipant Database', note: 'Declare participants at the top in order. Undeclared participants in messages are auto-added.' },
+            { heading: 'Message Types', content: 'User -> Server : Sync request\nServer --> User : Dashed return\nUser ->> Server : Async message\nServer -->> User : Async return', note: '-> solid arrow (synchronous), --> dashed arrow (return), ->> solid async, -->> dashed async.' },
+            { heading: 'Self-Messages', content: 'Server -> Server : Internal processing', note: 'When from and to are the same participant, a loopback arrow is drawn.' },
+            { heading: 'Notes', content: 'note over Server : Processing request\nnote over User : Waiting for response', note: 'Adds a highlighted note box over the specified participant.' },
+            { heading: 'Activation Boxes', content: 'participant Client\nparticipant API\n\nClient -> API : Request\nAPI -> API : Validate\nAPI --> Client : Response', note: 'Activation boxes are drawn automatically on participant lifelines when they send or receive messages.' },
+            { heading: 'Full Example', content: 'participant User\nparticipant Browser\nparticipant Server\n\nUser -> Browser : Click login\nBrowser -> Server : POST /login\nServer -> Server : Validate credentials\nnote over Server : Check database\nServer --> Browser : 200 OK + token\nBrowser --> User : Show dashboard', note: 'Participants appear as colored boxes at the top with dashed lifelines extending downward.' },
         ]
     },
     activity: {
         title: 'Activity Diagram Syntax Guide',
         sections: [
-            { heading: 'Nodes', content: '(start)\n(end)\n<Decision?>\nAction Name', note: '(start)/(end) = circles. <text> = decision diamond. Plain text = action.' },
-            { heading: 'Flows', content: '(start) -> Action\nAction -> <Done?>\n<Done?> -> Result : Yes\n<Done?> -> Action : No\nResult -> (end)', note: 'Use -> to connect. Add labels with : after target.' },
+            { heading: 'Node Types', content: '(start)\n(end)\n<Is Valid?>\nProcess Order\n[fork]\n[join]', note: '(start) = filled circle, (end) = bullseye circle, <text> = decision diamond, plain text = action (rounded rectangle), [fork]/[join] = synchronization bars.' },
+            { heading: 'Connecting Nodes', content: '(start) -> Check Input\nCheck Input -> <Valid?>\n<Valid?> -> Process : Yes\n<Valid?> -> Show Error : No\nProcess -> (end)\nShow Error -> (end)', note: 'Use -> to connect any two nodes. Add labels after : for conditional branches on decision diamonds.' },
+            { heading: 'Parallel Flows (Fork/Join)', content: '(start) -> [fork]\n[fork] -> Task A\n[fork] -> Task B\nTask A -> [join]\nTask B -> [join]\n[join] -> (end)', note: '[fork] splits flow into parallel paths. [join] waits for all paths to complete before continuing.' },
+            { heading: 'Full Example', content: '(start)\n(end)\n<Approved?>\nSubmit Request\nReview Request\nProcess Request\nReject Request\n\n(start) -> Submit Request\nSubmit Request -> Review Request\nReview Request -> <Approved?>\n<Approved?> -> Process Request : Yes\n<Approved?> -> Reject Request : No\nProcess Request -> (end)\nReject Request -> (end)', note: 'Declare all nodes first, then define all connections. Layout is automatic using the Dagre engine (top-to-bottom).' },
         ]
     },
     usecase: {
         title: 'Use Case Diagram Syntax Guide',
         sections: [
-            { heading: 'System Name', content: 'system "My Application"', note: 'Sets the system boundary title.' },
-            { heading: 'Actors & Use Cases', content: 'actor User\nactor Admin\nusecase Login', note: 'Declare actors and use cases. Undeclared targets auto-detect as use cases.' },
-            { heading: 'Relationships', content: 'User -> Login\nLogin ..> Authenticate : <<include>>\nCheckout ..> Apply Coupon : <<extend>>', note: '-> solid line, ..> dashed with stereotype label.' },
+            { heading: 'System Boundary', content: 'system "Online Shopping"', note: 'Sets the title of the system boundary box. Wrap in quotes if it contains spaces.' },
+            { heading: 'Actors & Use Cases', content: 'actor Customer\nactor Admin\nusecase Browse Products\nusecase Manage Inventory', note: 'Declare actors and use cases explicitly. Undeclared names in relationships are auto-detected (actors on the left, use cases inside the system).' },
+            { heading: 'Associations', content: 'Customer -> Browse Products\nCustomer -> Place Order\nAdmin -> Manage Inventory', note: 'Use -> for a solid association line between an actor and a use case.' },
+            { heading: 'Include & Extend', content: 'Place Order ..> Process Payment : <<include>>\nBrowse Products ..> Apply Filter : <<extend>>', note: 'Use ..> for dashed relationships. Add <<include>> or <<extend>> as the label after : to show stereotypes.' },
+            { heading: 'Full Example', content: 'system "Library System"\n\nactor Librarian\nactor Member\nusecase Search Books\nusecase Borrow Book\nusecase Return Book\nusecase Manage Catalog\n\nMember -> Search Books\nMember -> Borrow Book\nMember -> Return Book\nLibrarian -> Manage Catalog\nBorrow Book ..> Check Availability : <<include>>\nSearch Books ..> Advanced Search : <<extend>>', note: 'Actors are placed on the left/right sides. Use cases appear as ellipses inside the dashed system boundary.' },
         ]
     },
     er: {
         title: 'ER Diagram Syntax Guide (Chen Notation)',
         sections: [
-            { heading: 'Entities', content: 'entity User {\n  *UserID\n  Name\n  Email\n  +RoleID\n}', note: '* = Primary Key (underlined oval), + = Foreign Key (dashed oval).' },
-            { heading: 'Relationships', content: 'User -- Has -- Habit : 1,M\nUser -- Belongs -- Dept : M,1', note: 'Entity1 -- RelName -- Entity2 : leftCard,rightCard. Diamond is drawn between entities.' },
+            { heading: 'Defining Entities', content: 'entity Student {\n  *StudentID\n  Name\n  Email\n  +DeptID\n}', note: '* = Primary Key (underlined, shown above entity). + = Foreign Key (dashed, shown to the left). Regular attributes shown below. Attributes with : type are supported (e.g. Name : varchar).' },
+            { heading: 'Relationships with Cardinality', content: 'Student -- Enrolls -- Course : M,N\nCourse -- Taught By -- Professor : M,1\nDepartment -- Has -- Professor : 1,M', note: 'Format: Entity1 -- RelationshipName -- Entity2 : leftCard,rightCard. A diamond shape is drawn for each relationship. Cards: 1, M, N, 0..1, 0..N, 1..N, etc.' },
+            { heading: 'Self-Referencing Relationships', content: 'Employee -- Manages -- Employee : 1,M', note: 'An entity can relate to itself. The relationship diamond connects back to the same entity.' },
+            { heading: 'Multiple Entities Example', content: 'entity User {\n  *UserID\n  Username\n  Email\n}\n\nentity Order {\n  *OrderID\n  Date\n  Total\n  +UserID\n}\n\nentity Product {\n  *ProductID\n  Name\n  Price\n}\n\nUser -- Places -- Order : 1,M\nOrder -- Contains -- Product : M,N', note: 'Entity layout is automatic (Dagre LR). Primary keys fan out above, foreign keys to the left, regular attributes below each entity.' },
         ]
     },
     dfd: {
         title: 'Data Flow Diagram Syntax Guide',
         sections: [
-            { heading: 'Node Types', content: 'process ProcessName\ndatastore StoreName\nexternal ExternalEntity', note: 'process = circle, datastore = open rectangle, external = solid rectangle.' },
-            { heading: 'Data Flows', content: 'External -> Process : Data Label\nProcess -> Datastore : Store Data', note: 'Use -> for data flow arrows. Labels after : describe the data.' },
+            { heading: 'Node Types', content: 'process Validate Input\ndatastore User Database\nexternal Customer', note: 'process = circle, datastore (or store) = open-ended rectangle with parallel lines, external = solid rectangle. Names can contain spaces.' },
+            { heading: 'Data Flows', content: 'Customer -> Validate Input : Login Data\nValidate Input -> User Database : Query\nUser Database -> Validate Input : User Record\nValidate Input -> Customer : Auth Result', note: 'Use -> for solid arrows or --> for dashed arrows. Labels after : describe the data being transferred.' },
+            { heading: 'Validation Rules', content: '# These flows are INVALID and will show errors:\n# External -> External (not allowed)\n# Datastore -> Datastore (not allowed)\n# External -> Datastore (not allowed)', note: 'DFD rules require all data to flow through a process. Direct connections between externals, between datastores, or from external to datastore are rejected with an error message.' },
+            { heading: 'Alternate Datastore Keyword', content: 'store Inventory\nprocess Check Stock\n\nCheck Stock -> Inventory : Update count', note: 'You can use "store" as a shorthand for "datastore" — both are valid.' },
+            { heading: 'Full Example', content: 'external Customer\nprocess Process Order\nprocess Validate Payment\ndatastore Order Database\ndatastore Inventory\n\nCustomer -> Process Order : Order Details\nProcess Order -> Validate Payment : Payment Info\nValidate Payment -> Process Order : Confirmation\nProcess Order -> Order Database : Save Order\nProcess Order -> Inventory : Update Stock\nProcess Order -> Customer : Receipt', note: 'Layout is automatic (Dagre LR). Externals appear as rectangles, processes as circles, datastores as open-ended rectangles.' },
         ]
     },
 };

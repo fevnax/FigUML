@@ -43,7 +43,7 @@
     border-color: var(--primary);
 }
 
-/* Photo area — uses hero gradient colors */
+/* Photo area - uses hero gradient colors */
 .creator-card__photo {
     width: 100%;
     height: 140px;
@@ -55,10 +55,14 @@
     overflow: hidden;
 }
 
-.creator-card__photo img {
-    width: 100%;
-    height: 100%;
+.creator-card__photo img,
+.creator-card__photo-img {
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
     object-fit: cover;
+    border: 3px solid rgba(255, 255, 255, 0.7);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .creator-card__photo-placeholder {
@@ -74,7 +78,7 @@
     border: 3px solid rgba(255, 255, 255, 0.6);
 }
 
-/* Body — light themed */
+/* Body - light themed */
 .creator-card__body {
     padding: 20px 24px;
 }
